@@ -2,9 +2,9 @@ import numpy as np
 import pandas as pd
 import math
 import datetime
+from data_engineering import replace_design_latent
 
-
-# EXAMPLE TESTING GRADIENT DESCENT FOR MLE OF MU IN NORMAL LIKELIHOOD
+# EXAMPLE TESTING GRADIENT DESCENT FOR MLE OF MU=E(a) IN NORMAL LIKELIHOOD
 def mean_example():
     a = np.array([1,2,3,4,5,3,4,2,4,6,8,2,3])
     print(np.mean(a))
@@ -100,25 +100,10 @@ def margin_model_derivative_z(response, design_matrix, param_vector, indicators,
     return gradient
 
 
-def replace_design_latent(design_matrix, indicators, z):
-    """
-    Function for replacing the latent variables of a signle row of the design matrix with potentially new latent variables in z
-    :param design_matrix: transformed data for predictions/numerical calculations (N x d matrix)
-    :param indicators: Index numbers of away, home pairts for each example (N x 2 matrix)
-    :param z: latent variable vector, each element representing the hidden rating of a team with a specific index
-    :return: design matrix: changing the away/home latent variables to match potential updates to latent variable vector z
-    """
-    for index in range(design_matrix.shape[0]):
-        design_matrix.loc[index, "AwayRating"] = z[indicators[index, 0]]
-        design_matrix.loc[index, "HomeRating"] = z[indicators[index, 1]]
-
-    return design_matrix
-
-
 def latent_margin_gradient_descent(response, design_matrix, param_vector, indicators, weights, z, prior_means, prior_vars, MAP=False, show=False, gamma=0.01, tol=1e-06, max_iter=1000):
     """
     Function for performing gradient descent on latent variables of the margin model
-    (Finding the latent variable vector that minimizes the log-likelihood of the margin model given fixed model parameters
+    (Finding the latent variable vector that minimizes the log-likelihood of the margin model given fixed model parameters)
     :param response: The home margins of victory (N x 1 vector)
     :param design_matrix: The transformed pandas DataFrame for predictions (N x d matrix)
     :param param_vector: The coefficients to be multiplied by each matrix row ((d+1) x 1 vector) with last element being model variance
@@ -132,19 +117,21 @@ def latent_margin_gradient_descent(response, design_matrix, param_vector, indica
     :param tol: minimum change allowed for termination of gradient descent
     :param max_iter: maximum amount of iterations allowed in gradient descent before termination
     :return: z: the latent variable vector that minimizes the log-likelihood of the margin model given fixed model parameters (param_vector)
-    :return: design_matrix: the design matrix with the away/home variables changed to match the last update of the latent variables
     """
     z_change = tol + 1
     iterations = 0
     start = datetime.datetime.now()
+    # Run until no change in latent variables or a maximum amount of iterations reached
     while z_change > tol and iterations < max_iter:
         iterations += 1
         prev_z = np.copy(z)
+        # Calculate gradient of data under margin model with latent variables
         z_gradient = margin_model_derivative_z(response, design_matrix, param_vector, indicators, weights, z=prev_z,
                                                prior_means=prior_means, prior_vars=prior_vars, MAP=MAP)
+        # Take a gradient step and calculate change in latent variable vector
         z += gamma * z_gradient
         z_change = np.linalg.norm(z - prev_z)
-        design_matrix = replace_design_latent(design_matrix, indicators, z)
+        design_matrix = replace_design_latent(design_matrix=design_matrix, indicators=indicators, z=z)
 
         if show:
             print("Iteration: %d Latent Change: %.5f" % (iterations, z_change))
@@ -157,4 +144,4 @@ def latent_margin_gradient_descent(response, design_matrix, param_vector, indica
     if show:
         print("Time taken %.5f" % time_taken)
 
-    return z, design_matrix
+    return z

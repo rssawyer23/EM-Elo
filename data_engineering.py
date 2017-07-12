@@ -101,4 +101,18 @@ def create_sample_data(input_filename="NBAPointSpreadsAugmented.csv", output_fil
     log_reg_continuous = data.loc[:, ["AwayRating", "HomeRating", "HomeWin"]]
     log_reg_continuous.to_csv(output_filename, index=False)
 
-create_sample_data()
+
+def replace_design_latent(design_matrix, indicators, z):
+    """
+    Function for replacing the latent variables of a single row of the design matrix with potentially new latent variables in z
+    :param design_matrix: transformed data for predictions/numerical calculations (N x d matrix)
+    :param indicators: Index numbers of away, home pairs for each example (N x 2 matrix)
+    :param z: latent variable vector, each element representing the hidden rating of a team with a specific index
+    :return: design matrix: changing the away/home latent variables to match potential updates to latent variable vector z
+    """
+    for index in range(design_matrix.shape[0]):
+        design_matrix.loc[index, "AwayRating"] = z[indicators[index, 0]]
+        design_matrix.loc[index, "HomeRating"] = z[indicators[index, 1]]
+
+    return design_matrix
+#create_sample_data()
