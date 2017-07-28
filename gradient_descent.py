@@ -100,7 +100,7 @@ def margin_model_derivative_z(response, design_matrix, param_vector, indicators,
     return gradient
 
 
-def latent_margin_gradient_descent(response, design_matrix, param_vector, indicators, weights, z, prior_means, prior_vars, MAP=False, show=False, gamma=0.01, tol=1e-06, max_iter=1000):
+def latent_margin_gradient_descent(response, design_matrix, param_vector, indicators, weights, z, prior_means, prior_vars, MAP=False, show=False, gamma=0.001, tol=1e-06, max_iter=10):
     """
     Function for performing gradient descent on latent variables of the margin model
     (Finding the latent variable vector that minimizes the log-likelihood of the margin model given fixed model parameters)
@@ -129,7 +129,7 @@ def latent_margin_gradient_descent(response, design_matrix, param_vector, indica
         z_gradient = margin_model_derivative_z(response, design_matrix, param_vector, indicators, weights, z=prev_z,
                                                prior_means=prior_means, prior_vars=prior_vars, MAP=MAP)
         # Take a gradient step and calculate change in latent variable vector
-        z += gamma * z_gradient
+        z -= gamma * np.array(z_gradient).reshape(-1,1)
         z_change = np.linalg.norm(z - prev_z)
         design_matrix = replace_design_latent(design_matrix=design_matrix, indicators=indicators, z=z)
 

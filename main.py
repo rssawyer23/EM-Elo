@@ -1,13 +1,15 @@
 import numpy as np
+import pandas as pd
+import math
 import gradient_descent as gd
 from sklearn.linear_model import LinearRegression
 from data_engineering import replace_design_latent
+from data_engineering import load_data
+import datetime
 
-
-def elo_calculate_home_win_prob(away_rating, home_rating):
-    # Replace below statement with numpy equivalent of raising e to the power, home/away may need to be switched here
-    #return 1. / (1. + math.pow(e, home_rating - away_rating))
-    return 0
+def elo_calculate_home_win_prob(away_rating, home_rating, home_offset=0.5):
+    # Given away and home ratings, calculate probability of home win
+    return 1. / (1. + math.pow(math.e, away_rating - (home_rating + home_offset)))
 
 
 # Unsure if making a function for this is necessary or if Elo should only be done for testing phase
@@ -26,13 +28,20 @@ def fit_elo_model(x, y, indicators, p_means, k_step=32, show=False, home_advanta
     """
 
     new_z = np.copy(p_means)
-    for i in range(len(y)):
+    for i in range(len(y)): # For each game in dataset
+        # Get team ratings of teams playing
         away_elo = new_z[indicators[i][0]]
         home_elo = new_z[indicators[i][1]]
+
+        # Calculate home win probability
         expected_result = elo_calculate_home_win_prob(away_elo, home_elo + home_advantage)
         home_win = int(y[i] > 0)
+
+        # Calculate error based on actual result
         error = home_win - expected_result
         update_amount = k_step * error
+
+        # Update the team ratings of teams playing
         new_z[indicators[i][0]] += -1 * update_amount
         new_z[indicators[i][1]] += update_amount
 
@@ -66,7 +75,7 @@ def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, t
     change = tol + 1
     iterations = 0
     new_z, new_acc = np.copy(p_means), 0
-    old_x = np.copy(x)
+    old_x = x.copy()
 
     # Continue alternating between E and M steps until the algorithm converges or reaches the maximum amount of iterations
     while change > tol and iterations < max_iter:
@@ -84,14 +93,18 @@ def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, t
         finish_acc = lm.score(X=new_x, y=y)
         if finish_acc < start_acc:
             print("ERROR: GRADIENT DESCENT DECREASED MODEL ACCURACY")
+        elif show:
+            print("Expectation Accuracy Improvement: %.5f" % (finish_acc - start_acc))
 
         # Maximization step - solving for the linear model parameters given the latent team variables (z)
         lm.fit(X=new_x, y=y)
         param_vector = np.append(arr=lm.coef_, values=np.std(y)).reshape((-1, 1))
         new_acc = lm.score(X=new_x, y=y)
         change = new_acc - start_acc
+        if show:
+            print("Maximization Accuracy Improvement: %.5f" % change)
         iterations += 1
-        old_x = np.copy(old_x)
+        old_x = old_x.copy()
 
     if iterations >= max_iter:
         print("WARNING: MAXIMUM ITERATIONS OF EM ALGORITHM REACHED")
@@ -100,6 +113,15 @@ def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, t
     return new_z, new_acc, lm
 
 # Load data into appropriate format
+input_filename = "NBAPointSpreadsAugmented.csv"
+start = datetime.datetime.now()
+print("%s Loading Data..." % datetime.datetime.now())
+x, y, indicators, p_means, p_vars, z = load_data(input_filename)
+print("...Finished Loading Data %s seconds" % (datetime.datetime.now() - start).total_seconds())
+
+#TESTING
+fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=True)
+
 # Partition data using time-series cross validation
 # Create 6 models (binary, margin, joint) x (MLE, MAP)
 # Calculate accuracy on test set

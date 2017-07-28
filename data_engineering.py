@@ -115,4 +115,82 @@ def replace_design_latent(design_matrix, indicators, z):
         design_matrix.loc[index, "HomeRating"] = z[indicators[index, 1]]
 
     return design_matrix
+
+
+def create_indicator_matrix(original_matrix, away_colname="Away Team", home_colname=" Home Team"):
+    """
+    Function for creating the indicator matrix from a dataset that contains team names
+    :param original_matrix: dataframe containing all of the team data
+    :param away_colname: string for the column name of the dataframe containing the away team names
+    :param home_colname: string for the column name of the dataframe containing the home team names
+    :return: the indicator matrix (n x 2), and the number of unique teams found
+    """
+    team_dict = dict()
+    indicator_list = []
+    counter = 0
+    for index in range(original_matrix.shape[0]):
+        new_row = []
+        if counter == 0:
+            team_dict[original_matrix.loc[index, away_colname]] = 0
+        try:
+            new_row.append(team_dict[original_matrix.loc[index, away_colname]])
+        except KeyError:
+            team_dict[original_matrix.loc[index, away_colname]] = counter
+            counter += 1
+            new_row.append(counter)
+        try:
+            new_row.append(team_dict[original_matrix.loc[index, home_colname]])
+        except KeyError:
+            team_dict[original_matrix.loc[index, home_colname]] = counter
+            counter += 1
+            new_row.append(counter)
+        indicator_list.append(new_row)
+    return np.array(indicator_list), counter + 1
+
+
+def load_data(input_filename="NBAPointSpreadsAugmented.csv", response_type="margin", away_points=" Away Points", home_points=" Home Points"):
+    """
+    Function for returning useful arguments for other functions
+    :param input_filename: string for the filename containing the csv of game data
+    :param response_type: string that is one of {binary, margin, joint} for the different types of models
+    :param away_points: string that is the column name of dataframe containing the away scores
+    :param home_points: string that is the column name of dataframe containing the home scores
+    :return: 
+        design_matrix - the X that has (independent) data columns
+        response - the Y chosen by the model type
+        indicators - the (n x 2) matrix of team indicators for each game
+        p_means - the prior means of the latent team ratings
+        p_vars - the prior variances of the latent team ratings
+        initial_z - the initial ratings for each team
+    """
+    data = pd.read_csv(input_filename)
+
+    # Getting indicator matrix
+    indicator_matrix, team_number = create_indicator_matrix(data)
+
+    # Getting response based on given type
+    if response_type == "binary":
+        response = pd.Series(data.loc[:, home_points] > data.loc[:, away_points], dtype=int)
+    elif response_type == "margin":
+        response = pd.Series(data.loc[:, home_points] - data.loc[:, away_points], dtype=float)
+    elif response_type == "joint":
+        response = data.loc[:, [home_points, away_points]]
+    else:
+        print("Unrecognized response type")
+        response = np.zeros(data.shape[0])
+
+    # Initializing team ratings
+    p_means = np.zeros((team_number,1))
+    p_vars = np.ones((team_number,1))
+    initial_z = np.random.normal(0, 1, (team_number,1))
+
+    # Creating design matrix
+    data_columns = ["HomeRest", "AwayRest"]
+    design_matrix = data.loc[:,data_columns]
+    design_matrix["AwayRating"] = np.zeros(design_matrix.shape[0])
+    design_matrix["HomeRating"] = np.zeros(design_matrix.shape[0])
+    design_matrix = replace_design_latent(design_matrix, indicator_matrix, initial_z)
+
+    return design_matrix, np.array(response).reshape(-1,1), indicator_matrix, p_means, p_vars, initial_z
+
 #create_sample_data()
