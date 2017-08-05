@@ -100,7 +100,7 @@ def margin_model_derivative_z(response, design_matrix, param_vector, indicators,
     return gradient
 
 
-def latent_margin_gradient_descent(response, design_matrix, param_vector, indicators, weights, z, prior_means, prior_vars, MAP=False, show=False, gamma=0.001, tol=1e-06, max_iter=10):
+def latent_margin_gradient_descent(response, design_matrix, param_vector, indicators, weights, z, prior_means, prior_vars, MAP=False, show=False, gamma=0.0001, tol=1e-06, max_iter=100):
     """
     Function for performing gradient descent on latent variables of the margin model
     (Finding the latent variable vector that minimizes the log-likelihood of the margin model given fixed model parameters)
@@ -142,6 +142,6 @@ def latent_margin_gradient_descent(response, design_matrix, param_vector, indica
     finish = datetime.datetime.now()
     time_taken = (finish - start).total_seconds() / 60.
     if show:
-        print("Time taken %.5f" % time_taken)
+        print("Time taken (minutes): %.5f" % time_taken)
 
     return z

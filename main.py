@@ -5,6 +5,7 @@ import gradient_descent as gd
 from sklearn.linear_model import LinearRegression
 from data_engineering import replace_design_latent
 from data_engineering import load_data
+from data_engineering import parse_seasons
 import datetime
 
 def elo_calculate_home_win_prob(away_rating, home_rating, home_offset=0.5):
@@ -48,7 +49,7 @@ def fit_elo_model(x, y, indicators, p_means, k_step=32, show=False, home_advanta
     return new_z
 
 
-def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, tol=1e-07, max_iter=100):
+def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, tol=1e-07, max_iter=3):
     """
     Performs the Expectation-Maximization Algorithm for the Margin Model (point differential linear regression)
         Expectation = Calculate the optimal latent variables for each team given the linear model parameters
@@ -69,7 +70,9 @@ def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, t
 
     # Initializing linear model parameters
     lm = LinearRegression()
-    lm.fit(X=x, y=y)
+    lm.intercept_ = np.array([0.5])
+    lm.coef_ = np.array([[1.0, -1.0, -0.5, 0.5]])
+    #lm.fit(X=x, y=y)
     param_vector = np.append(arr=lm.coef_, values=np.std(y)).reshape((-1, 1))
 
     change = tol + 1
@@ -80,6 +83,8 @@ def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, t
     # Continue alternating between E and M steps until the algorithm converges or reaches the maximum amount of iterations
     while change > tol and iterations < max_iter:
         start_acc = lm.score(X=old_x, y=y)
+        if show:
+            print("Iteration %d start accuracy %.5f" % (iterations, start_acc))
 
         # Expectation step - solving for the optimal latent team variables given the linear model parameters (param_vector)
         new_z = gd.latent_margin_gradient_descent(response=y, design_matrix=old_x, param_vector=param_vector,
@@ -89,20 +94,24 @@ def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, t
 
         new_x = replace_design_latent(design_matrix=old_x, indicators=indicators, z=new_z)
 
-        # Internal checks to make sure gradient descent step improves model
+        # Internal checks to make sure gradient descent step improved model
         finish_acc = lm.score(X=new_x, y=y)
+        if show:
+            print("Iteration %d after gradient descent accuracy %.5f" % (iterations, start_acc))
         if finish_acc < start_acc:
-            print("ERROR: GRADIENT DESCENT DECREASED MODEL ACCURACY")
+            print("ERROR: GRADIENT DESCENT DECREASED MODEL ACCURACY (from %0.5f to %0.5f)" % (start_acc, finish_acc))
         elif show:
-            print("Expectation Accuracy Improvement: %.5f" % (finish_acc - start_acc))
+            print("Expectation Step Accuracy Improvement: %.5f" % (finish_acc - start_acc))
 
         # Maximization step - solving for the linear model parameters given the latent team variables (z)
         lm.fit(X=new_x, y=y)
+        print(lm.intercept_)
+        print(lm.coef_)
         param_vector = np.append(arr=lm.coef_, values=np.std(y)).reshape((-1, 1))
         new_acc = lm.score(X=new_x, y=y)
         change = new_acc - start_acc
         if show:
-            print("Maximization Accuracy Improvement: %.5f" % change)
+            print("Maximization Step Accuracy Improvement: %.5f" % change)
         iterations += 1
         old_x = old_x.copy()
 
@@ -116,17 +125,49 @@ def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, t
 input_filename = "NBAPointSpreadsAugmented.csv"
 start = datetime.datetime.now()
 print("%s Loading Data..." % datetime.datetime.now())
-x, y, indicators, p_means, p_vars, z = load_data(input_filename)
+x, y, indicators, p_means, p_vars, z, latent_team_dictionary = load_data(input_filename)
+season_row_dictionary = parse_seasons(input_filename)
 print("...Finished Loading Data %s seconds" % (datetime.datetime.now() - start).total_seconds())
 
-#TESTING
-fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=True)
+# Season carryover = True/False
+# For model type (the 6 models + Elo baseline + Spread baseline?)
+## for season in season_row_dictionary.keys():
+## for season in [2008, 2009, 2010, 2011, 2012]:
+### Get season split indices
+####   Train on first split
+####   Test on next split (record accuracy)
 
-# Partition data using time-series cross validation
-# Create 6 models (binary, margin, joint) x (MLE, MAP)
-# Calculate accuracy on test set
-# Calculate accuracy on test set using baseline (Elo)
+season = 2008 # Will be replaced by for loop through seasons (in order?)
+interval_size = 0.05 # This represents what percent of games should be used as accuracy bins
+season_x = x.loc[season_row_dictionary[season], :] # May need to reindex this for other seasons after 2008
+season_y = y[season_row_dictionary[season]] # This will need to change for the joint setting
+season_indicators = indicators[season_row_dictionary[season], :]
+season_games = season_x.shape[0]
+
+train_end = int(season_games / 2) # consider making this a function, need an interval variable to increment this
+test_end = int(train_end + season_games * 0.05)
+
+season_z, train_accuracy, season_lm = fit_margin_model(season_x.iloc[0:train_end, :], season_y[0:train_end], season_indicators[0:train_end, :],
+                 p_means, p_vars, MAP=False, show=True)
+
+# test_accuracy = calculate_test_accuracy(season_z, season_lm, season_indicators[train_end:test_end, :], season_x[train_end:test_end, :])
+# accuracy_results[(model_type, season, season_interval)] = test_accuracy
+
+# Post Model Fit Diagnostics
+print("Season %d using %d%% for training data" % (season, train_end/season_games*100))
+# print("Accuracy on next %d%% of games" % interval_size * 100)
+print(season_lm.intercept_)
+print(season_lm.coef_)
+for team in latent_team_dictionary.keys():
+    print("%s: %.5f" % (team, season_z[latent_team_dictionary[team]]))
+
+
+
+##TESTING
+#fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=True)
 
 # NOTES ON THINGS TO TRY
 # Try with/without using spread as a feature
 # Try using spread as dependent variable vs actual game score as dependent variable
+# Try using interaction term between team ratings?
+# Try carry-over between seasons (and test earlier portions of data)

@@ -3,6 +3,7 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.linear_model import LinearRegression
 import gradient_descent as gd
+import data_engineering as de
 import math
 
 ## TESTING LOGISITIC REGRESSION GRADIENT DESCENT BY HAND
@@ -37,7 +38,13 @@ p_vars = np.array([2.]*len(z)).reshape((-1,1))
 lm = LinearRegression(fit_intercept=False, normalize=False, copy_X=True, n_jobs=1)
 lm.fit(X=x,y=y)
 param_vector = np.append(arr=lm.coef_, values=np.std(y)).reshape((-1,1))
-print(lm.score(X=x, y=y))
+print("Baseline Accuracy: %.5f" % lm.score(X=x, y=y))
+print(lm.coef_)
+
+# x["RatingInteraction"] = pd.Series(x["AwayRating"]*x["HomeRating"])
+# lm.fit(X=x,y=y)
+# print("With Interaction Accuracy: %.5f" % lm.score(X=x,y=y))
+# print(lm.coef_)
 
 ## Testing gradient function, testing to see if improvement using same model parameters after one gradient step
 # gradient = gd.margin_model_derivative_z(response=y, design_matrix=x, param_vector=param_vector, indicators=indicators,
@@ -51,18 +58,21 @@ print(lm.score(X=x, y=y))
 
 ## Testing the full gradient descent method
 new_z = np.copy(z)
+old_x = np.copy(x)
 new_acc = 0
 tol = 1e-07
 change = tol + 1
 iterations = 0
 while change > tol:
-    start_acc = lm.score(X=x,y=y)
-    new_z, x = gd.latent_margin_gradient_descent(response=y, design_matrix=x, param_vector=param_vector, indicators=indicators,
+    start_acc = lm.score(X=old_x,y=y)
+    new_z = gd.latent_margin_gradient_descent(response=y, design_matrix=old_x, param_vector=param_vector, indicators=indicators,
                                                  weights=np.ones(len(y)).reshape((-1,1)),z=new_z, prior_means=p_means, prior_vars=p_vars, MAP=False, show=False)
-    finish_r2 = lm.score(X=x, y=y) # For internal checks to make sure gradient descent improving model
-    lm.fit(X=x, y=y)
+    new_x = de.replace_design_latent(design_matrix=old_x, indicators=indicators, z=new_z)
+    finish_r2 = lm.score(X=new_x, y=y) # For internal checks to make sure gradient descent improving model
+    lm.fit(X=new_x, y=y)
     param_vector = np.append(arr=lm.coef_, values=np.std(y)).reshape((-1, 1))
-    new_acc = lm.score(X=x, y=y)
+    new_acc = lm.score(X=new_x, y=y)
+    old_x = np.copy(new_x)
     change = new_acc - start_acc
     iterations += 1
 print("Finished MLE with %d iterations" % iterations)
@@ -77,13 +87,15 @@ change = tol + 1
 lm = LinearRegression(fit_intercept=False, normalize=False, copy_X=True, n_jobs=1)
 lm.fit(X=x,y=y)
 while change > tol:
-    start_acc = lm.score(X=x,y=y)
-    new_z, x = gd.latent_margin_gradient_descent(response=y, design_matrix=x, param_vector=param_vector, indicators=indicators,
+    start_acc = lm.score(X=old_x,y=y)
+    new_z = gd.latent_margin_gradient_descent(response=y, design_matrix=old_x, param_vector=param_vector, indicators=indicators,
                                                  weights=np.ones(len(y)).reshape((-1,1)),z=new_z, prior_means=p_means, prior_vars=p_vars, MAP=True, show=False)
-    finish_acc = lm.score(X=x, y=y) # For internal checks to make sure gradient descent improving model
-    lm.fit(X=x, y=y)
+    new_x = de.replace_design_latent(design_matrix=old_x, indicators=indicators, z=new_z)
+    finish_acc = lm.score(X=new_x, y=y) # For internal checks to make sure gradient descent improving model
+    lm.fit(X=new_x, y=y)
     param_vector = np.append(arr=lm.coef_, values=np.std(y)).reshape((-1, 1))
-    new_acc = lm.score(X=x, y=y)
+    new_acc = lm.score(X=new_x, y=y)
+    old_x = np.copy(new_x)
     change = new_acc - start_acc
 print("Finished MAP with %d iterations" % iterations)
 final_acc_MAP = new_acc

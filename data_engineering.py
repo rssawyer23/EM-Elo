@@ -123,7 +123,7 @@ def create_indicator_matrix(original_matrix, away_colname="Away Team", home_coln
     :param original_matrix: dataframe containing all of the team data
     :param away_colname: string for the column name of the dataframe containing the away team names
     :param home_colname: string for the column name of the dataframe containing the home team names
-    :return: the indicator matrix (n x 2), and the number of unique teams found
+    :return: the indicator matrix (n x 2), and the number of unique teams found, mapping from team name to index of latent vector
     """
     team_dict = dict()
     indicator_list = []
@@ -145,7 +145,7 @@ def create_indicator_matrix(original_matrix, away_colname="Away Team", home_coln
             counter += 1
             new_row.append(counter)
         indicator_list.append(new_row)
-    return np.array(indicator_list), counter + 1
+    return np.array(indicator_list), counter + 1, team_dict
 
 
 def load_data(input_filename="NBAPointSpreadsAugmented.csv", response_type="margin", away_points=" Away Points", home_points=" Home Points"):
@@ -162,11 +162,12 @@ def load_data(input_filename="NBAPointSpreadsAugmented.csv", response_type="marg
         p_means - the prior means of the latent team ratings
         p_vars - the prior variances of the latent team ratings
         initial_z - the initial ratings for each team
+        team_dict - the mapping from team name to index of the latent variable vector
     """
     data = pd.read_csv(input_filename)
 
     # Getting indicator matrix
-    indicator_matrix, team_number = create_indicator_matrix(data)
+    indicator_matrix, team_number, team_dict = create_indicator_matrix(data)
 
     # Getting response based on given type
     if response_type == "binary":
@@ -191,6 +192,27 @@ def load_data(input_filename="NBAPointSpreadsAugmented.csv", response_type="marg
     design_matrix["HomeRating"] = np.zeros(design_matrix.shape[0])
     design_matrix = replace_design_latent(design_matrix, indicator_matrix, initial_z)
 
-    return design_matrix, np.array(response).reshape(-1,1), indicator_matrix, p_means, p_vars, initial_z
+    return design_matrix, np.array(response).reshape(-1,1), indicator_matrix, p_means, p_vars, initial_z, team_dict
+
+
+def parse_seasons(input_filename, season_colname=" Season"):
+    """
+    Function for returning a dictionary of (season name, boolean array) pairs with boolean array being true for games in that season
+    :param input_filename: string for the full data file name
+    :param season_colname: string for the column name containing unique season identifiers
+    :return season_row_dict: dictionary of season to boolean array of if game is within season
+    """
+    # Load data
+    data = pd.read_csv(input_filename)
+
+    # Getting all unique season identifiers
+    season_list = list(data[season_colname].unique())
+    season_row_dict = dict()
+
+    # Getting truth of season identifiers with full data rows into label of the dictionary
+    for season_label in season_list:
+        season_row_dict[season_label] = data[season_colname] == season_label
+    return season_row_dict
+
 
 #create_sample_data()
