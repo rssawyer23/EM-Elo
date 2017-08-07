@@ -183,7 +183,7 @@ def load_data(input_filename="NBAPointSpreadsAugmented.csv", response_type="marg
     # Initializing team ratings
     p_means = np.zeros((team_number,1))
     p_vars = np.ones((team_number,1))
-    initial_z = np.random.normal(0, 1, (team_number,1))
+    initial_z = np.zeros((team_number,1))
 
     # Creating design matrix
     data_columns = ["HomeRest", "AwayRest"]

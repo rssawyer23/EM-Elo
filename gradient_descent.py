@@ -13,10 +13,41 @@ def mean_example():
     sigma = 10
     n = len(a)
     gamma = 0.01
-    for i in range(100):
-        print(mu)
-        mu = mu + gamma * (mu/sigma) * (np.sum(a) - n * mu)
+    iterations = 0
+    last_mu = 10000
+    change = 0.1
+    start = datetime.datetime.now()
+    while change > 0.0001:
+        mu = mu + gamma * (1/sigma) * (np.sum(a) - n * mu)
 
+        change = abs(mu - last_mu)
+        last_mu = mu
+        iterations += 1
+    print("Iterations taken for convergence (gradient descent): %d" % iterations)
+    print("Time taken: %.5f" % (datetime.datetime.now() - start).total_seconds())
+
+def mean_example_newton():
+    a = np.array([1,2,3,4,5,3,4,2,4,6,8,2,3])
+    print(np.mean(a))
+
+    mu = 0.1
+    sigma = 10
+    n = len(a)
+    gamma = 0.01
+    iterations = 0
+    last_mu = 100000
+    change = 0.1
+    start = datetime.datetime.now()
+    while change > 0.0001:
+        first_derivative = (1/sigma) * (np.sum(a) - n * mu)
+        second_derivative = -1 * n
+        mu = mu - first_derivative / second_derivative
+
+        change = abs(mu - last_mu)
+        last_mu = mu
+        iterations += 1
+    print("Iterations taken for convergence (newton): %d" % iterations)
+    print("Time taken: %.5f" % (datetime.datetime.now() - start).total_seconds())
 
 def sigmoid(t):
     if t < 0:
@@ -81,6 +112,7 @@ def margin_model_derivative_z(response, design_matrix, param_vector, indicators,
     # Calcuating necessary elements for gradient calculation
     K_teams = len(z)
     gradient = np.zeros(K_teams).reshape((-1,1))
+    second_gradient = np.zeros(K_teams).reshape((-1,1))
     predictions = design_matrix.dot(param_vector[:-1])
     difference = response - predictions
     away_derivatives = (param_vector[1] / param_vector[-1]) * difference
@@ -91,16 +123,17 @@ def margin_model_derivative_z(response, design_matrix, param_vector, indicators,
         away_indicator_vector = create_one_hot(indicators[i][0], K_teams)
         home_indicator_vector = create_one_hot(indicators[i][1], K_teams)
         gradient += weights[i] * (away_indicator_vector * away_derivatives.loc[i,0] + home_indicator_vector * home_derivatives.loc[i,0])
+        second_gradient += weights[i] * (away_indicator_vector * -1 * param_vector[1] ** 2 / param_vector[-1] + home_indicator_vector * -1 * param_vector[2]**2 / param_vector[-1])
 
     # Adjusting gradient for MAP estimate (prior over latent variables)
     if MAP:
         MAP_gradient = -1 * (z - prior_means) / prior_vars
         gradient += MAP_gradient
 
-    return gradient
+    return gradient, second_gradient
 
 
-def latent_margin_gradient_descent(response, design_matrix, param_vector, indicators, weights, z, prior_means, prior_vars, MAP=False, show=False, gamma=0.0001, tol=1e-06, max_iter=100):
+def latent_margin_gradient_descent(response, design_matrix, param_vector, indicators, weights, z, prior_means, prior_vars, MAP=False, show=False, gamma=0.01, tol=1e-06, max_iter=1000):
     """
     Function for performing gradient descent on latent variables of the margin model
     (Finding the latent variable vector that minimizes the log-likelihood of the margin model given fixed model parameters)
@@ -126,18 +159,19 @@ def latent_margin_gradient_descent(response, design_matrix, param_vector, indica
         iterations += 1
         prev_z = np.copy(z)
         # Calculate gradient of data under margin model with latent variables
-        z_gradient = margin_model_derivative_z(response, design_matrix, param_vector, indicators, weights, z=prev_z,
+        z_gradient, z_second_gradient = margin_model_derivative_z(response, design_matrix, param_vector, indicators, weights, z=prev_z,
                                                prior_means=prior_means, prior_vars=prior_vars, MAP=MAP)
+
         # Take a gradient step and calculate change in latent variable vector
-        z -= gamma * np.array(z_gradient).reshape(-1,1)
+        z += gamma * np.array(z_gradient).reshape(-1,1)
         z_change = np.linalg.norm(z - prev_z)
         design_matrix = replace_design_latent(design_matrix=design_matrix, indicators=indicators, z=z)
 
         if show:
-            print("Iteration: %d Latent Change: %.5f" % (iterations, z_change))
+            print("Expectation Optimization Iteration: %d Latent Change: %.8f" % (iterations, z_change))
 
     if iterations == max_iter:
-        print("Maximum iterations (%d) reached for termination" % max_iter)
+        print("Maximum iterations (%d) reached for termination of expectation optimization" % max_iter)
 
     finish = datetime.datetime.now()
     time_taken = (finish - start).total_seconds() / 60.

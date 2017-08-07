@@ -3,9 +3,7 @@ import pandas as pd
 import math
 import gradient_descent as gd
 from sklearn.linear_model import LinearRegression
-from data_engineering import replace_design_latent
-from data_engineering import load_data
-from data_engineering import parse_seasons
+import data_engineering as de
 import datetime
 
 def elo_calculate_home_win_prob(away_rating, home_rating, home_offset=0.5):
@@ -49,7 +47,7 @@ def fit_elo_model(x, y, indicators, p_means, k_step=32, show=False, home_advanta
     return new_z
 
 
-def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, tol=1e-07, max_iter=3):
+def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, tol=1e-07, max_iter=1):
     """
     Performs the Expectation-Maximization Algorithm for the Margin Model (point differential linear regression)
         Expectation = Calculate the optimal latent variables for each team given the linear model parameters
@@ -84,7 +82,7 @@ def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, t
     while change > tol and iterations < max_iter:
         start_acc = lm.score(X=old_x, y=y)
         if show:
-            print("Iteration %d start accuracy %.5f" % (iterations, start_acc))
+            print("EM Iteration %d start accuracy %.5f" % (iterations, start_acc))
 
         # Expectation step - solving for the optimal latent team variables given the linear model parameters (param_vector)
         new_z = gd.latent_margin_gradient_descent(response=y, design_matrix=old_x, param_vector=param_vector,
@@ -92,14 +90,14 @@ def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, t
                                                      weights=np.ones(len(y)).reshape((-1, 1)), z=new_z,
                                                      prior_means=p_means, prior_vars=p_vars, MAP=MAP, show=show)
 
-        new_x = replace_design_latent(design_matrix=old_x, indicators=indicators, z=new_z)
+        new_x = de.replace_design_latent(design_matrix=old_x, indicators=indicators, z=new_z)
 
         # Internal checks to make sure gradient descent step improved model
         finish_acc = lm.score(X=new_x, y=y)
         if show:
-            print("Iteration %d after gradient descent accuracy %.5f" % (iterations, start_acc))
+            print("EM Iteration %d after gradient descent accuracy %.5f" % (iterations, start_acc))
         if finish_acc < start_acc:
-            print("ERROR: GRADIENT DESCENT DECREASED MODEL ACCURACY (from %0.5f to %0.5f)" % (start_acc, finish_acc))
+            print("ERROR: EXPECTATION OPTIMIZATION DECREASED MODEL ACCURACY (from %0.5f to %0.5f)" % (start_acc, finish_acc))
         elif show:
             print("Expectation Step Accuracy Improvement: %.5f" % (finish_acc - start_acc))
 
@@ -113,20 +111,20 @@ def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, t
         if show:
             print("Maximization Step Accuracy Improvement: %.5f" % change)
         iterations += 1
-        old_x = old_x.copy()
+        old_x = new_x.copy()
 
     if iterations >= max_iter:
         print("WARNING: MAXIMUM ITERATIONS OF EM ALGORITHM REACHED")
     elif show:
-        print("Finished with %d iterations" % iterations)
+        print("Finished EM with %d iterations" % iterations)
     return new_z, new_acc, lm
 
 # Load data into appropriate format
 input_filename = "NBAPointSpreadsAugmented.csv"
 start = datetime.datetime.now()
 print("%s Loading Data..." % datetime.datetime.now())
-x, y, indicators, p_means, p_vars, z, latent_team_dictionary = load_data(input_filename)
-season_row_dictionary = parse_seasons(input_filename)
+x, y, indicators, p_means, p_vars, z, latent_team_dictionary = de.load_data(input_filename)
+season_row_dictionary = de.parse_seasons(input_filename)
 print("...Finished Loading Data %s seconds" % (datetime.datetime.now() - start).total_seconds())
 
 # Season carryover = True/False
@@ -158,8 +156,13 @@ print("Season %d using %d%% for training data" % (season, train_end/season_games
 # print("Accuracy on next %d%% of games" % interval_size * 100)
 print(season_lm.intercept_)
 print(season_lm.coef_)
+
+sortable_team_dict = dict()
 for team in latent_team_dictionary.keys():
-    print("%s: %.5f" % (team, season_z[latent_team_dictionary[team]]))
+    sortable_team_dict[team] = season_z[latent_team_dictionary[team]]
+team_rating_df = pd.DataFrame.from_dict(sortable_team_dict, orient="index")
+team_rating_df.columns = ["Rating"]
+print(team_rating_df.sort_values(by="Rating", axis=0, ascending=False))
 
 
 
