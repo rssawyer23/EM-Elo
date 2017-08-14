@@ -69,7 +69,8 @@ def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, t
     # Initializing linear model parameters
     lm = LinearRegression()
     lm.intercept_ = np.array([0.5])
-    lm.coef_ = np.array([[1.0, -1.0, -0.5, 0.5]])
+    # PARAM VECTOR SHOULD BE AWAY COEF, HOME COEF, AWAY REST COEF, HOME REST COEF
+    lm.coef_ = np.array([[-1.0, 1.0, -0.5, 0.5]])
     #lm.fit(X=x, y=y)
     param_vector = np.append(arr=lm.coef_, values=np.std(y)).reshape((-1, 1))
 
@@ -81,6 +82,8 @@ def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, t
     # Continue alternating between E and M steps until the algorithm converges or reaches the maximum amount of iterations
     while change > tol and iterations < max_iter:
         start_acc = lm.score(X=old_x, y=y)
+        print(lm.intercept_)
+        print(lm.coef_)
         if show:
             print("EM Iteration %d start accuracy %.5f" % (iterations, start_acc))
 
@@ -95,7 +98,7 @@ def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, t
         # Internal checks to make sure gradient descent step improved model
         finish_acc = lm.score(X=new_x, y=y)
         if show:
-            print("EM Iteration %d after gradient descent accuracy %.5f" % (iterations, start_acc))
+            print("EM Iteration %d after gradient descent accuracy %.5f" % (iterations, finish_acc))
         if finish_acc < start_acc:
             print("ERROR: EXPECTATION OPTIMIZATION DECREASED MODEL ACCURACY (from %0.5f to %0.5f)" % (start_acc, finish_acc))
         elif show:
@@ -141,6 +144,7 @@ season_x = x.loc[season_row_dictionary[season], :] # May need to reindex this fo
 season_y = y[season_row_dictionary[season]] # This will need to change for the joint setting
 season_indicators = indicators[season_row_dictionary[season], :]
 season_games = season_x.shape[0]
+
 
 train_end = int(season_games / 2) # consider making this a function, need an interval variable to increment this
 test_end = int(train_end + season_games * 0.05)

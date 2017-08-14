@@ -127,7 +127,7 @@ def create_indicator_matrix(original_matrix, away_colname="Away Team", home_coln
     """
     team_dict = dict()
     indicator_list = []
-    counter = 0
+    counter = 0 # Counts number of teams added to dictionary of team:index mappings
     for index in range(original_matrix.shape[0]):
         new_row = []
         if counter == 0:
