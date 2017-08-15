@@ -110,7 +110,7 @@ def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, t
         print(lm.coef_)
         param_vector = np.append(arr=lm.coef_, values=np.std(y)).reshape((-1, 1))
         new_acc = lm.score(X=new_x, y=y)
-        change = new_acc - start_acc
+        change = new_acc - finish_acc
         if show:
             print("Maximization Step Accuracy Improvement: %.5f" % change)
         iterations += 1

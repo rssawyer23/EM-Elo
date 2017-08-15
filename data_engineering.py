@@ -186,10 +186,11 @@ def load_data(input_filename="NBAPointSpreadsAugmented.csv", response_type="marg
     initial_z = np.zeros((team_number,1))
 
     # Creating design matrix
-    data_columns = ["HomeRest", "AwayRest"]
-    design_matrix = data.loc[:,data_columns]
+    design_matrix = pd.DataFrame()
     design_matrix["AwayRating"] = np.zeros(design_matrix.shape[0])
     design_matrix["HomeRating"] = np.zeros(design_matrix.shape[0])
+    design_matrix["AwayRest"] = data.loc[:,"AwayRest"].copy()
+    design_matrix["HomeRest"] = data.loc[:,"HomeRest"].copy()
     design_matrix = replace_design_latent(design_matrix, indicator_matrix, initial_z)
 
     return design_matrix, np.array(response).reshape(-1,1), indicator_matrix, p_means, p_vars, initial_z, team_dict
