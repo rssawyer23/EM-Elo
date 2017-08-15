@@ -122,6 +122,12 @@ def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, t
         print("Finished EM with %d iterations" % iterations)
     return new_z, new_acc, lm
 
+
+def calculate_test_accuracy(latent_z, model, indicators, design_matrix, response):
+    input_matrix = de.replace_design_latent(design_matrix=design_matrix, indicators=indicators, z=latent_z).copy()
+    accuracy = model.score(X=input_matrix, y=response)
+    return accuracy
+
 # Load data into appropriate format
 input_filename = "NBAPointSpreadsAugmented.csv"
 start = datetime.datetime.now()
@@ -137,23 +143,29 @@ print("...Finished Loading Data %s seconds" % (datetime.datetime.now() - start).
 ### Get season split indices
 ####   Train on first split
 ####   Test on next split (record accuracy)
-
+accuracy_results = dict()
+model_type = "Margin-MLE"
 season = 2008 # Will be replaced by for loop through seasons (in order?)
 interval_size = 0.05 # This represents what percent of games should be used as accuracy bins
 season_x = x.loc[season_row_dictionary[season], :] # May need to reindex this for other seasons after 2008
 season_y = y[season_row_dictionary[season]] # This will need to change for the joint setting
 season_indicators = indicators[season_row_dictionary[season], :]
 season_games = season_x.shape[0]
+start_percent = 0.5
 
-
-train_end = int(season_games / 2) # consider making this a function, need an interval variable to increment this
+train_end = int(season_games / 2) # consider making this a function, need an interval variable to increment this by 0.05 or other interval
+# train_end = int((start_percent + interval_size * iteration) * season_games) this should work as long as iteration ranges from 0 to (1 - start_percent)/interval_size
 test_end = int(train_end + season_games * 0.05)
+season_interval = "%d%%-%d%%" % (train_end / season_games * 100, test_end / season_games * 100)
 
 season_z, train_accuracy, season_lm = fit_margin_model(season_x.iloc[0:train_end, :], season_y[0:train_end], season_indicators[0:train_end, :],
                  p_means, p_vars, MAP=False, show=True)
 
-# test_accuracy = calculate_test_accuracy(season_z, season_lm, season_indicators[train_end:test_end, :], season_x[train_end:test_end, :])
-# accuracy_results[(model_type, season, season_interval)] = test_accuracy
+print("Train Accuracy with %s in %s season up to %d data: %.5f" % (model_type, season, train_end / season_games*100, train_accuracy))
+test_accuracy = calculate_test_accuracy(season_z, season_lm, season_indicators[train_end:test_end, :], season_x.iloc[train_end:test_end, :], season_y[train_end:test_end])
+print("Test Accuracy with %s in %d season %s interval: %.5f" % (model_type, season, season_interval, test_accuracy))
+#accuracy_results[(model_type, season, season_interval)] = test_accuracy
+accuracy_results[("Margin", season, 0.55)] = test_accuracy
 
 # Post Model Fit Diagnostics
 print("Season %d using %d%% for training data" % (season, train_end/season_games*100))

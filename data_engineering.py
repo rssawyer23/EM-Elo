@@ -110,9 +110,11 @@ def replace_design_latent(design_matrix, indicators, z):
     :param z: latent variable vector, each element representing the hidden rating of a team with a specific index
     :return: design matrix: changing the away/home latent variables to match potential updates to latent variable vector z
     """
-    for index in range(design_matrix.shape[0]):
-        design_matrix.loc[index, "AwayRating"] = z[indicators[index, 0]]
-        design_matrix.loc[index, "HomeRating"] = z[indicators[index, 1]]
+
+    for index in design_matrix.index:
+        offset = design_matrix.index[0]
+        design_matrix.loc[index, "AwayRating"] = z[indicators[index - offset, 0]]
+        design_matrix.loc[index, "HomeRating"] = z[indicators[index - offset, 1]]
 
     return design_matrix
 
