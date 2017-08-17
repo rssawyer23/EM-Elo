@@ -43,3 +43,34 @@ cov_ah = cor(a,h)*sd(a)*sd(h)
 mu_v = c(mu_h, mu_a)
 cov_m = cbind(c(var(h),cov_ah),c(cov_ah, var(a)))
 
+
+## PARAMETERS FOR BASELINE TESTING
+season_start_index = 1
+season_mid_index = 658
+season_end_index = 1317
+r_data = data[season_start_index:season_mid_index,]
+r2_data = data[season_mid_index:season_end_index,]
+
+## BASELINE BINARY MODELS
+full_lr = glm(HomeWin~Spread..Relative.to.Away.,data=data, family=binomial(link=logit))
+summary(full_lr)
+
+r_lr = glm(HomeWin~Spread..Relative.to.Away.,data=r_data,family=binomial(link=logit))
+summary(r_lr)
+yhat = predict(r_lr, r2_data)
+yhat[yhat < 0.5] = 0
+yhat[yhat >= 0.5] = 1
+accuracy = sum(yhat == r2_data[,"HomeWin"]) / length(yhat);accuracy
+
+## BASELINE MARGIN MODELS
+full_lm = lm(HomeMargin~Spread..Relative.to.Away., data=data)
+summary(full_lm)
+
+r_lm = lm(HomeMargin~Spread..Relative.to.Away., data=r_data)
+summary(r_lm)
+# Calculating R^2 on second half of season using model on first half of season
+yhat = predict(r_lm, r2_data)
+residual_sos = sum((yhat - r2_data[,"HomeMargin"])^2)
+total_sos = sum((mean(r2_data[,"HomeMargin"]) - r2_data[,"HomeMargin"])^2)
+second_half_r2 = 1 - residual_sos / total_sos; second_half_r2
+
