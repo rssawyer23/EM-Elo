@@ -129,6 +129,7 @@ def margin_model_derivative_z(response, design_matrix, param_vector, indicators,
     if MAP:
         MAP_gradient = -1 * (z - prior_means) / prior_vars
         gradient += MAP_gradient
+        second_gradient += -1 / prior_vars
 
     return gradient, second_gradient
 

@@ -129,25 +129,23 @@ def create_indicator_matrix(original_matrix, away_colname="Away Team", home_coln
     """
     team_dict = dict()
     indicator_list = []
-    counter = 0 # Counts number of teams added to dictionary of team:index mappings
+    counter = 0  # Counts number of teams added to dictionary of team:index mappings
     for index in range(original_matrix.shape[0]):
         new_row = []
-        if counter == 0:
-            team_dict[original_matrix.loc[index, away_colname]] = 0
         try:
             new_row.append(team_dict[original_matrix.loc[index, away_colname]])
         except KeyError:
             team_dict[original_matrix.loc[index, away_colname]] = counter
-            counter += 1
             new_row.append(counter)
+            counter += 1  # Incrementing so next team has different number
         try:
             new_row.append(team_dict[original_matrix.loc[index, home_colname]])
         except KeyError:
             team_dict[original_matrix.loc[index, home_colname]] = counter
-            counter += 1
             new_row.append(counter)
+            counter += 1
         indicator_list.append(new_row)
-    return np.array(indicator_list), counter + 1, team_dict
+    return np.array(indicator_list), counter, team_dict
 
 
 def load_data(input_filename="NBAPointSpreadsAugmented.csv", response_type="margin", away_points=" Away Points", home_points=" Home Points"):
@@ -184,8 +182,8 @@ def load_data(input_filename="NBAPointSpreadsAugmented.csv", response_type="marg
 
     # Initializing team ratings
     p_means = np.zeros((team_number,1))
-    p_vars = np.ones((team_number,1))
-    initial_z = np.zeros((team_number,1))
+    p_vars = np.ones((team_number,1)) * 3.63 # 3.63 is variance of margin from dataset
+    initial_z = np.random.normal(loc=0,scale=1,size=(team_number,1))
 
     # Creating design matrix
     design_matrix = pd.DataFrame()
