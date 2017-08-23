@@ -133,10 +133,25 @@ input_filename = "NBAPointSpreadsAugmented.csv"
 start = datetime.datetime.now()
 print("%s Loading Data..." % datetime.datetime.now())
 x, y, indicators, p_means, p_vars, z, latent_team_dictionary = de.load_data(input_filename)
+team_list = list(latent_team_dictionary.keys())
 season_row_dictionary = de.parse_seasons(input_filename)
 print("...Finished Loading Data %s seconds" % (datetime.datetime.now() - start).total_seconds())
 
+result_file = open("AccuracyOutput.csv", 'w')
+result_file.write("Model,Season")
 interval_size = 0.05 # This represents what percent of games should be used as accuracy bins
+start_percent = 0.5
+for i in np.arange(start_percent, 1.0, interval_size):
+    result_file.write(",Train%.2f%%" % i)
+result_file.write("\n")
+
+sortable_team_dict = dict()
+for team in latent_team_dictionary.keys():
+    sortable_team_dict[team] = z[latent_team_dictionary[team]]
+seasons_rating_df = pd.DataFrame.from_dict(sortable_team_dict, orient="index")
+seasons_rating_df.columns = ["Initialization"]
+seasons_rating_df.index = team_list
+
 # Season carryover = True/False
 # For model type (the 6 models + Elo baseline + Spread baseline?)
 ## for season in season_row_dictionary.keys():
@@ -145,11 +160,12 @@ interval_size = 0.05 # This represents what percent of games should be used as a
 ####   Train on first split
 ####   Test on next split (record accuracy)
 iteration = 0
-season = 2009  # Will be replaced by for loop through seasons (in order?)
+season = 2008  # Will be replaced by for loop through seasons
 MAP = False
+model_type = "Margin"
 
 accuracy_results = dict()
-model_type = "Margin-%s" % "MLE" if not MAP else "MAP"
+model_string = "%s-%s" % (model_type, "MLE" if not MAP else "MAP")
 
 
 season_x = x.loc[season_row_dictionary[season], :]
@@ -157,22 +173,24 @@ season_x.index = range(season_x.shape[0])
 season_y = y[season_row_dictionary[season]]  # This will need to change for the joint setting
 season_indicators = indicators[season_row_dictionary[season], :]
 season_games = season_x.shape[0]
+season_accuracy = []
 
-start_percent = 0.5
-
-#train_end = int(season_games / 2) # consider making this a function, need an interval variable to increment this by 0.05 or other interval
 train_end = int((start_percent + interval_size * iteration) * season_games) # this should work as long as iteration ranges from 0 to (1 - start_percent)/interval_size
 test_end = int(train_end + season_games * interval_size)
 season_interval = "%d%%-%d%%" % (train_end / season_games * 100, test_end / season_games * 100)
 
 season_z, train_accuracy, season_lm = fit_margin_model(season_x.iloc[0:train_end, :], season_y[0:train_end], season_indicators[0:train_end, :],
-                 p_means, p_vars, MAP=MAP, show=True)
+                 p_means, p_vars, MAP=MAP, show=False)
 
-print("Train Accuracy with %s in %s season up to %d%% data: %.5f" % (model_type, season, train_end / season_games*100, train_accuracy))
+print("Train Accuracy with %s in %s season up to %d%% data: %.5f" % (model_string, season, train_end / season_games*100, train_accuracy))
 test_accuracy = calculate_test_accuracy(season_z, season_lm, season_indicators[train_end:test_end, :], season_x.iloc[train_end:test_end, :], season_y[train_end:test_end])
-print("Test Accuracy with %s in %d season %s interval: %.5f" % (model_type, season, season_interval, test_accuracy))
+print("Test Accuracy with %s in %d season %s interval: %.5f" % (model_string, season, season_interval, test_accuracy))
 #accuracy_results[(model_type, season, season_interval)] = test_accuracy
-accuracy_results[("Margin", season, 0.55)] = test_accuracy
+season_accuracy.append(test_accuracy)
+
+write_string = "%s,%s," % (model_string, season)
+write_string += ",".join(["%.5f" % e for e in season_accuracy])
+result_file.write(write_string+"\n")
 
 # Post Model Fit Diagnostics
 print("Season %d using %d%% for training data" % (season, train_end/season_games*100))
@@ -184,9 +202,10 @@ sortable_team_dict = dict()
 for team in latent_team_dictionary.keys():
     sortable_team_dict[team] = season_z[latent_team_dictionary[team]]
 team_rating_df = pd.DataFrame.from_dict(sortable_team_dict, orient="index")
-team_rating_df.columns = ["Rating"]
-print(team_rating_df.sort_values(by="Rating", axis=0, ascending=False))
-
+team_rating_df.columns = ["%s-%d%%" % (season, train_end/season_games*100)]
+print(team_rating_df.sort_values(by="%s-%d%%" % (season, train_end/season_games*100), axis=0, ascending=False))
+seasons_rating_df = pd.concat([seasons_rating_df, team_rating_df], axis=1)
+seasons_rating_df.to_csv("RatingsOutput.csv", index=True)  # Index is the team names
 
 
 ##TESTING
