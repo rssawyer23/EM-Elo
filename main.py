@@ -6,9 +6,15 @@ from sklearn.linear_model import LinearRegression
 import data_engineering as de
 import datetime
 
-def elo_calculate_home_win_prob(away_rating, home_rating, home_offset=0.5):
+
+def elo_calculate_home_win_prob(away_rating, home_rating, home_offset=0.5):  # should be able to use this in an 'apply' context
     # Given away and home ratings, calculate probability of home win
     return 1. / (1. + math.pow(math.e, away_rating - (home_rating + home_offset)))
+
+
+def calculate_temperature(iteration, start_k=32, decay_factor=0.0005):
+    temp = start_k * np.e ** (-1 * decay_factor * iteration)
+    return temp
 
 
 # Unsure if making a function for this is necessary or if Elo should only be done for testing phase
@@ -27,18 +33,22 @@ def fit_elo_model(x, y, indicators, p_means, k_step=32, show=False, home_advanta
     """
 
     new_z = np.copy(p_means)
-    for i in range(len(y)): # For each game in dataset
+    for i in range(len(y)):  # For each game in dataset
         # Get team ratings of teams playing
         away_elo = new_z[indicators[i][0]]
         home_elo = new_z[indicators[i][1]]
 
         # Calculate home win probability
-        expected_result = elo_calculate_home_win_prob(away_elo, home_elo + home_advantage)
+        expected_result = elo_calculate_home_win_prob(away_elo, home_elo, home_advantage)
         home_win = int(y[i] > 0)
 
         # Calculate error based on actual result
         error = home_win - expected_result
-        update_amount = k_step * error
+        if k_step == -1:
+            k_param = calculate_temperature(iteration=i, start_k=32, decay_factor=0.05)
+        else:
+            k_param = k_step
+        update_amount = k_param * error
 
         # Update the team ratings of teams playing
         new_z[indicators[i][0]] += -1 * update_amount
@@ -128,11 +138,28 @@ def calculate_test_accuracy(latent_z, model, indicators, design_matrix, response
     accuracy = model.score(X=input_matrix, y=response)
     return accuracy
 
+
+def elo_test_accuracy(latent_z, indicators, design_matrix, response):
+    input_matrix = de.replace_design_latent(design_matrix=design_matrix, indicators=indicators, z=latent_z).copy()
+    proba_predictions = input_matrix.apply(lambda row: elo_calculate_home_win_prob(row["AwayRating"], row["HomeRating"]),
+                                     axis=1)
+    predictions = np.array(proba_predictions >= 0.5, dtype=int)
+    accuracy = np.mean(np.equal(predictions, response))
+    return accuracy
+
+
+def calculate_margin_baseline(spreads, actual):
+    rss = np.sum((spreads.reshape(-1, 1) - actual)**2)
+    tss = np.sum((np.mean(actual) - actual)**2)
+    r2 = 1 - rss / tss
+    return r2
+
 # Load data into appropriate format
 input_filename = "NBAPointSpreadsAugmented.csv"
+show = True
 start = datetime.datetime.now()
 print("%s Loading Data..." % datetime.datetime.now())
-x, y, indicators, p_means, p_vars, z, latent_team_dictionary = de.load_data(input_filename)
+x, y_dict, indicators, p_means, p_vars, z, latent_team_dictionary, baseline_dict = de.load_data(input_filename, response_type="margin")
 team_list = list(latent_team_dictionary.keys())
 season_row_dictionary = de.parse_seasons(input_filename)
 print("...Finished Loading Data %s seconds" % (datetime.datetime.now() - start).total_seconds())
@@ -157,54 +184,92 @@ seasons_rating_df.index = team_list
 ## for season in season_row_dictionary.keys():
 ## for season in [2008, 2009, 2010, 2011, 2012]:
 ### Get season split indices
+#### for iteration in range((1-start_percent)/interval_size)
 ####   Train on first split
 ####   Test on next split (record accuracy)
-iteration = 0
-season = 2008  # Will be replaced by for loop through seasons
+#season = 2008  # Will be replaced by for loop through seasons
 MAP = False
 model_type = "Margin"
+
 
 accuracy_results = dict()
 model_string = "%s-%s" % (model_type, "MLE" if not MAP else "MAP")
 
+for season in [2008, 2009, 2010, 2011, 2012]:
+    season_x = x.loc[season_row_dictionary[season], :]
+    season_x.index = range(season_x.shape[0])
+    season_margin_y = np.array(y_dict["Margin"]).reshape(-1,1)[season_row_dictionary[season]]
+    season_margin_baseline = np.array(baseline_dict["Margin"]).reshape(-1,1)[season_row_dictionary[season]]
+    season_binary_y = np.array(y_dict["Binary"]).reshape(-1,1)[season_row_dictionary[season]]
+    #season_joint_y = y_dict["Joint"].loc[season_row_dictionary[season],:]
+    season_indicators = indicators[season_row_dictionary[season], :]
+    season_games = season_x.shape[0]
+    margin_train_accuracies = []
+    margin_test_accuracies = []
+    baseline_accuracies = []
+    elo16_test_accuracies = []
+    elo32_test_accuracies = []
+    elod_test_accuracies = []
 
-season_x = x.loc[season_row_dictionary[season], :]
-season_x.index = range(season_x.shape[0])
-season_y = y[season_row_dictionary[season]]  # This will need to change for the joint setting
-season_indicators = indicators[season_row_dictionary[season], :]
-season_games = season_x.shape[0]
-season_accuracy = []
+    for iteration in range(int((1-start_percent)/interval_size)):
+        train_end = int((start_percent + interval_size * iteration) * season_games)
+        test_end = int(train_end + season_games * interval_size)
+        season_interval = "%d%%-%d%%" % (train_end / season_games * 100, test_end / season_games * 100)
 
-train_end = int((start_percent + interval_size * iteration) * season_games) # this should work as long as iteration ranges from 0 to (1 - start_percent)/interval_size
-test_end = int(train_end + season_games * interval_size)
-season_interval = "%d%%-%d%%" % (train_end / season_games * 100, test_end / season_games * 100)
+        ## RUNNING BINARY MODEL AND BASELINE
+        # season_z, margin_train, season_lm = fit_binary_model(season_x.iloc[0:train_end, :], season_y[0:train_end],
+        #                                                      season_indicators[0:train_end, :],
+        #                                                      p_means, p_vars, MAP=MAP, show=False)
+        elo_z16 = fit_elo_model(x=season_x.iloc[0:train_end, :], y=season_binary_y[0:train_end], indicators=season_indicators[0:train_end, :],
+                         p_means=p_means, k_step=16, show=False)
+        elo_z32 = fit_elo_model(x=season_x.iloc[0:train_end, :], y=season_binary_y[0:train_end], indicators=season_indicators[0:train_end, :],
+                         p_means=p_means, k_step=32, show=False)
+        elo_zd = fit_elo_model(x=season_x.iloc[0:train_end, :], y=season_binary_y[0:train_end], indicators=season_indicators[0:train_end, :],
+                         p_means=p_means, k_step=-1, show=False)
 
-season_z, train_accuracy, season_lm = fit_margin_model(season_x.iloc[0:train_end, :], season_y[0:train_end], season_indicators[0:train_end, :],
-                 p_means, p_vars, MAP=MAP, show=False)
+        elo16_test_accuracies.append(elo_test_accuracy(elo_z16, season_indicators[train_end:test_end, :], season_x.iloc[train_end:test_end, :], season_binary_y[train_end:test_end]))
+        elo32_test_accuracies.append(elo_test_accuracy(elo_z32, season_indicators[train_end:test_end, :], season_x.iloc[train_end:test_end, :], season_binary_y[train_end:test_end]))
+        elod_test_accuracies.append(elo_test_accuracy(elo_zd, season_indicators[train_end:test_end, :], season_x.iloc[train_end:test_end, :], season_binary_y[train_end:test_end]))
 
-print("Train Accuracy with %s in %s season up to %d%% data: %.5f" % (model_string, season, train_end / season_games*100, train_accuracy))
-test_accuracy = calculate_test_accuracy(season_z, season_lm, season_indicators[train_end:test_end, :], season_x.iloc[train_end:test_end, :], season_y[train_end:test_end])
-print("Test Accuracy with %s in %d season %s interval: %.5f" % (model_string, season, season_interval, test_accuracy))
-#accuracy_results[(model_type, season, season_interval)] = test_accuracy
-season_accuracy.append(test_accuracy)
+        ## RUNNING MARGIN MODEL AND BASELINE
+        season_z, margin_train, season_lm = fit_margin_model(season_x.iloc[0:train_end, :], season_margin_y[0:train_end], season_indicators[0:train_end, :],
+                         p_means, p_vars, MAP=MAP, show=False)
+        test_accuracy = calculate_test_accuracy(season_z, season_lm, season_indicators[train_end:test_end, :], season_x.iloc[train_end:test_end, :], season_margin_y[train_end:test_end])
+        baseline_accuracy = calculate_margin_baseline(season_margin_baseline[train_end:test_end], season_margin_y[train_end:test_end])
+        margin_train_accuracies.append(margin_train)
+        margin_test_accuracies.append(test_accuracy)
+        baseline_accuracies.append(baseline_accuracy)
+        if show:
+            print("Test Accuracy with %s in %d season %s interval: %.5f" % (model_string, season, season_interval, test_accuracy))
+            print("Train Accuracy with %s in %s season up to %d%% data: %.5f" % (model_string, season, train_end / season_games * 100, margin_train))
+            print("Baseline Accuracy with %s in %d season %s interval: %.5f" % (model_string, season, season_interval, baseline_accuracy))
 
-write_string = "%s,%s," % (model_string, season)
-write_string += ",".join(["%.5f" % e for e in season_accuracy])
-result_file.write(write_string+"\n")
+            # Post Model Fit Diagnostics
+            print("Season %d using %d%% for training data" % (season, train_end/season_games*100))
+            # print("Accuracy on next %d%% of games" % interval_size * 100)
+            print(season_lm.intercept_)
+            print(season_lm.coef_)
 
-# Post Model Fit Diagnostics
-print("Season %d using %d%% for training data" % (season, train_end/season_games*100))
-# print("Accuracy on next %d%% of games" % interval_size * 100)
-print(season_lm.intercept_)
-print(season_lm.coef_)
+        sortable_team_dict = dict()
+        for team in latent_team_dictionary.keys():
+            sortable_team_dict[team] = season_z[latent_team_dictionary[team]]
+        team_rating_df = pd.DataFrame.from_dict(sortable_team_dict, orient="index")
+        team_rating_df.columns = ["%s-%d%%" % (season, train_end/season_games*100)]
+        print(team_rating_df.sort_values(by="%s-%d%%" % (season, train_end/season_games*100), axis=0, ascending=False))
+        seasons_rating_df = pd.concat([seasons_rating_df, team_rating_df], axis=1)
 
-sortable_team_dict = dict()
-for team in latent_team_dictionary.keys():
-    sortable_team_dict[team] = season_z[latent_team_dictionary[team]]
-team_rating_df = pd.DataFrame.from_dict(sortable_team_dict, orient="index")
-team_rating_df.columns = ["%s-%d%%" % (season, train_end/season_games*100)]
-print(team_rating_df.sort_values(by="%s-%d%%" % (season, train_end/season_games*100), axis=0, ascending=False))
-seasons_rating_df = pd.concat([seasons_rating_df, team_rating_df], axis=1)
+    write_string = "%s,%s," % (model_string, season)
+    write_string += ",".join(["%.5f" % e for e in margin_test_accuracies])
+    result_file.write(write_string+"\n")
+
+    write_string = "%s-Baseline,%s," % (model_type, season)
+    write_string += ",".join(["%.5f" % e for e in baseline_accuracies])
+    result_file.write(write_string+"\n")
+
+    write_string = "%s-Train,%s" % (model_type, season)
+    write_string += ",".join(["%.5f" % e for e in margin_train_accuracies])
+    result_file.write(write_string+"\n")
+
 seasons_rating_df.to_csv("RatingsOutput.csv", index=True)  # Index is the team names
 
 

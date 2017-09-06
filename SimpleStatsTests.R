@@ -7,8 +7,8 @@ a = data[,"Away.Points"]
 mu_a = mean(a);mu_a
 sd_a = sd(a);sd_a
 margin = h - a
-mu_margin = mean(margin)
-sd_margin = sd(margin)
+mu_margin = mean(margin);mu_margin
+sd_margin = sd(margin);sd_margin
 cor.test(a,h)
 t.test(a,h)
 var.test(a,h)

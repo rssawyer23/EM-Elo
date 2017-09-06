@@ -163,23 +163,24 @@ def load_data(input_filename="NBAPointSpreadsAugmented.csv", response_type="marg
         p_vars - the prior variances of the latent team ratings
         initial_z - the initial ratings for each team
         team_dict - the mapping from team name to index of the latent variable vector
+        baseline - information necessary for calculating a baseline accuracy (vegas spread and over/under)
     """
     data = pd.read_csv(input_filename)
 
     # Getting indicator matrix
     indicator_matrix, team_number, team_dict = create_indicator_matrix(data)
 
-    # Getting response based on given type
-    if response_type == "binary":
-        response = pd.Series(data.loc[:, home_points] > data.loc[:, away_points], dtype=int)
-    elif response_type == "margin":
-        response = pd.Series(data.loc[:, home_points] - data.loc[:, away_points], dtype=float)
-    elif response_type == "joint":
-        response = data.loc[:, [home_points, away_points]]
-    else:
-        print("Unrecognized response type")
-        response = np.zeros(data.shape[0])
+    response_dict = dict()
+    response_dict["Binary"] = pd.Series(data.loc[:, home_points] > data.loc[:, away_points], dtype=int)
+    response_dict["Margin"] = pd.Series(data.loc[:, home_points] - data.loc[:, away_points], dtype=float)
+    response_dict["Joint"] = data.loc[:, [home_points, away_points]]
 
+    baseline_dict = dict()
+    baseline_dict["Margin"] = data.loc[:," Spread (Relative to Away)"]
+    jbaseline = pd.DataFrame()
+    jbaseline[home_points] = data.loc[:, " Over/Under"] / 2.0 + data.loc[:, " Spread (Relative to Away)"] / 2.0
+    jbaseline[away_points] = data.loc[:, " Over/Under"] / 2.0 - data.loc[:, " Spread (Relative to Away)"] / 2.0
+    baseline_dict["Joint"] = jbaseline
     # Initializing team ratings
     p_means = np.zeros((team_number,1))
     p_vars = np.ones((team_number,1)) * 3.63 # 3.63 is variance of margin from dataset
@@ -193,7 +194,8 @@ def load_data(input_filename="NBAPointSpreadsAugmented.csv", response_type="marg
     design_matrix["HomeRest"] = data.loc[:,"HomeRest"].copy()
     design_matrix = replace_design_latent(design_matrix, indicator_matrix, initial_z)
 
-    return design_matrix, np.array(response).reshape(-1,1), indicator_matrix, p_means, p_vars, initial_z, team_dict
+    #np.array(response).reshape(-1,1)
+    return design_matrix, response_dict, indicator_matrix, p_means, p_vars, initial_z, team_dict, baseline_dict
 
 
 def parse_seasons(input_filename, season_colname=" Season"):
