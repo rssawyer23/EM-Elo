@@ -110,6 +110,8 @@ def margin_model_derivative_z(response, design_matrix, param_vector, indicators,
     """
 
     # Calcuating necessary elements for gradient calculation
+    # REQUIRES AWAY AND HOME COEFFICIENTS TO BE IN PARAM_VECTOR[0] AND PARAM_VECTOR[1] RESPECTIVELY
+    # REQUIRES MODEL PRECISION IN PARAM_VECTOR[-1]
     K_teams = len(z)
     gradient = np.zeros(K_teams).reshape((-1,1))
     second_gradient = np.zeros(K_teams).reshape((-1,1))
@@ -118,6 +120,8 @@ def margin_model_derivative_z(response, design_matrix, param_vector, indicators,
     away_derivatives = (param_vector[0] / param_vector[-1]) * difference
     home_derivatives = (param_vector[1] / param_vector[-1]) * difference
 
+    team_updates = [[] for _ in range(K_teams)]
+
     # Summing gradient into respective team latent variables
     for i in range(design_matrix.shape[0]):
         away_indicator_vector = create_one_hot(indicators[i][0], K_teams)
@@ -125,18 +129,20 @@ def margin_model_derivative_z(response, design_matrix, param_vector, indicators,
         gradient += weights[i] * (away_indicator_vector * away_derivatives.loc[i,0] + home_indicator_vector * home_derivatives.loc[i,0])
         second_gradient += weights[i] * (away_indicator_vector * -1 * param_vector[0] ** 2 / param_vector[-1] + home_indicator_vector * -1 * param_vector[1]**2 / param_vector[-1])
 
+        team_updates[indicators[i][0]].append(weights[i] * away_derivatives.loc[i,0])
+        team_updates[indicators[i][1]].append(weights[i] * home_derivatives.loc[i,0])
     # Adjusting gradient for MAP estimate (prior over latent variables)
     if MAP:
         MAP_gradient = -1 * (z - prior_means) / prior_vars
         gradient += MAP_gradient
         second_gradient += -1 / prior_vars
 
-    return gradient, second_gradient
+    return gradient, second_gradient, np.array([np.std(team_game_updates) for team_game_updates in team_updates])
 
 
-def latent_margin_gradient_descent(response, design_matrix, param_vector, indicators, weights, z, prior_means, prior_vars, MAP=False, show=False, newton_update=True, gamma=0.0001, tol=1e-06, max_iter=100):
+def latent_margin_optimization(response, design_matrix, param_vector, indicators, weights, z, prior_means, prior_vars, MAP=False, show=False, newton_update=True, gamma=0.0001, tol=1e-06, max_iter=100):
     """
-    Function for performing gradient descent on latent variables of the margin model
+    Function for performing numerical optimization on latent variables of the margin model
     (Finding the latent variable vector that minimizes the log-likelihood of the margin model given fixed model parameters)
     :param response: The home margins of victory (N x 1 vector)
     :param design_matrix: The transformed pandas DataFrame for predictions (N x d matrix)
@@ -155,12 +161,13 @@ def latent_margin_gradient_descent(response, design_matrix, param_vector, indica
     z_change = tol + 1
     iterations = 0
     start = datetime.datetime.now()
+    gradient_std = np.zeros(len(z))
     # Run until no change in latent variables or a maximum amount of iterations reached
     while z_change > tol and iterations < max_iter:
         iterations += 1
         prev_z = np.copy(z)
         # Calculate gradient of data under margin model with latent variables
-        z_gradient, z_second_gradient = margin_model_derivative_z(response, design_matrix, param_vector, indicators, weights, z=prev_z,
+        z_gradient, z_second_gradient, gradient_stds = margin_model_derivative_z(response, design_matrix, param_vector, indicators, weights, z=prev_z,
                                                prior_means=prior_means, prior_vars=prior_vars, MAP=MAP)
 
         # Take a gradient step and calculate change in latent variable vector
@@ -182,4 +189,4 @@ def latent_margin_gradient_descent(response, design_matrix, param_vector, indica
     if show:
         print("Time taken (minutes): %.5f" % time_taken)
 
-    return z
+    return z, gradient_stds

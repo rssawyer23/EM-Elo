@@ -104,7 +104,7 @@ def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, t
             print("EM Iteration %d start accuracy %.5f" % (iterations, start_acc))
 
         # Expectation step - solving for the optimal latent team variables given the linear model parameters (param_vector)
-        new_z = gd.latent_margin_gradient_descent(response=y, design_matrix=old_x, param_vector=param_vector,
+        new_z, z_std = gd.latent_margin_optimization(response=y, design_matrix=old_x, param_vector=param_vector,
                                                      indicators=indicators,
                                                      weights=np.ones(len(y)).reshape((-1, 1)), z=new_z,
                                                      prior_means=p_means, prior_vars=p_vars, MAP=MAP, show=show)
@@ -137,7 +137,7 @@ def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, t
         print("WARNING: MAXIMUM ITERATIONS OF EM ALGORITHM REACHED")
     elif show:
         print("Finished EM with %d iterations" % iterations)
-    return new_z, new_acc, lm
+    return new_z, new_acc, lm, z_std
 
 
 def calculate_test_accuracy(latent_z, model, indicators, design_matrix, response):
@@ -195,6 +195,12 @@ def calculate_binary_test_accuracy(latent_z, model, indicators, design_matrix, r
     return accuracy
 
 
+def calculate_joint_baseline(predictions, actual):  # Assumes away and home score in same index location (0 and 1)
+    rss = np.sum((predictions.iloc[:,0] - actual.iloc[:,0])**2) + np.sum((predictions.iloc[:,1] - actual.iloc[:,1])**2)
+    tss = np.sum((actual.iloc[:,0].mean() - actual.iloc[:,0])**2) + np.sum((actual.iloc[:,1].mean() - actual.iloc[:,1])**2)
+    r2 = 1 - rss / tss
+    return r2
+
 # Load data into appropriate format
 input_filename = "NBAPointSpreadsAugmented.csv"
 show = True
@@ -214,6 +220,7 @@ for i in np.arange(start_percent, 1.0, interval_size):
 result_file.write("\n")
 
 seasons_margin_rating_df = initialize_team_rating_df(latent_team_dictionary, z)
+seasons_margin_std_df = initialize_team_rating_df(latent_team_dictionary, z)
 seasons_elod_rating_df = initialize_team_rating_df(latent_team_dictionary, z)
 seasons_elol_rating_df = initialize_team_rating_df(latent_team_dictionary, z)
 seasons_eloh_rating_df = initialize_team_rating_df(latent_team_dictionary, z)
@@ -234,7 +241,7 @@ model_type = "Margin"
 accuracy_results = dict()
 model_string = "%s-%s" % (model_type, "MLE" if not MAP else "MAP")
 first_words = ["Margin-MLE", "Margin-MLE-Binary", "Margin-Baseline", "Margin-Baseline-Binary", "Margin-MLE-Train",
-               "Binary-EloL", "Binary-EloH", "Binary-EloD"]
+               "Binary-EloL", "Binary-EloH", "Binary-EloD", "Joint-Baseline"]
 
 #for season in [2008, 2009, 2010, 2011, 2012]:
 for season in [2008]:
@@ -243,7 +250,8 @@ for season in [2008]:
     season_margin_y = np.array(y_dict["Margin"]).reshape(-1,1)[season_row_dictionary[season]]
     season_margin_baseline = np.array(baseline_dict["Margin"]).reshape(-1,1)[season_row_dictionary[season]]
     season_binary_y = np.array(y_dict["Binary"]).reshape(-1,1)[season_row_dictionary[season]]
-    #season_joint_y = y_dict["Joint"].loc[season_row_dictionary[season],:]
+    season_joint_y = y_dict["Joint"].loc[season_row_dictionary[season],:]
+    season_joint_baseline = baseline_dict["Joint"].loc[season_row_dictionary[season], :]
     season_indicators = indicators[season_row_dictionary[season], :]
     season_games = season_x.shape[0]
 
@@ -272,7 +280,7 @@ for season in [2008]:
         accuracy_dictionary["Binary-EloD"].append(elo_test_accuracy(elo_zd, season_indicators[train_end:test_end, :], season_x.iloc[train_end:test_end, :], season_binary_y[train_end:test_end]))
 
         ## RUNNING MARGIN MODEL AND BASELINE
-        season_z, margin_train, season_lm = fit_margin_model(season_x.iloc[0:train_end, :], season_margin_y[0:train_end], season_indicators[0:train_end, :],
+        season_z, margin_train, season_lm, season_z_std = fit_margin_model(season_x.iloc[0:train_end, :], season_margin_y[0:train_end], season_indicators[0:train_end, :],
                          p_means, p_vars, MAP=MAP, show=False)
         test_accuracy = calculate_test_accuracy(season_z, season_lm, season_indicators[train_end:test_end, :], season_x.iloc[train_end:test_end, :], season_margin_y[train_end:test_end])
         b_test_accuracy = calculate_binary_test_accuracy(season_z, season_lm, season_indicators[train_end:test_end, :], season_x.iloc[train_end:test_end, :], season_margin_y[train_end:test_end])
@@ -283,6 +291,13 @@ for season in [2008]:
         accuracy_dictionary["Margin-MLE-Binary"].append(b_test_accuracy)
         accuracy_dictionary["Margin-Baseline"].append(baseline_accuracy)
         accuracy_dictionary["Margin-Baseline-Binary"].append(b_baseline_accuracy)
+
+        ## RUNNING JOINT MODEL AND BASELINE
+        # fit function
+        # test accuracy
+        # binary test accuracy - DO NOT DO THIS, SHOULD BE SAME AS MARGIN-BASELINE-BINARY ACCURACY
+        j_baseline_accuracy = calculate_joint_baseline(season_joint_baseline.loc[train_end:test_end, :], season_joint_y.loc[train_end:test_end, :])
+        accuracy_dictionary["Joint-Baseline"].append(j_baseline_accuracy)
 
         if show:
             print("Test Accuracy with %s in %d season %s interval: %.5f" % (model_string, season, season_interval, test_accuracy))
@@ -298,6 +313,9 @@ for season in [2008]:
         margin_rating_df = generate_team_rating_df(latent_team_dictionary, season_z, show=False)
         seasons_margin_rating_df = pd.concat([seasons_margin_rating_df, margin_rating_df], axis=1)
 
+        margin_std_df = generate_team_rating_df(latent_team_dictionary, season_z_std, show=False)
+        seasons_margin_std_df = pd.concat([seasons_margin_std_df, margin_std_df], axis=1)
+
         elod_rating_df = generate_team_rating_df(latent_team_dictionary, elo_zd, show=False)
         seasons_elod_rating_df = pd.concat([seasons_elod_rating_df, elod_rating_df], axis=1)
 
@@ -307,7 +325,6 @@ for season in [2008]:
         eloh_rating_df = generate_team_rating_df(latent_team_dictionary, elo_zh, show=True)
         seasons_eloh_rating_df = pd.concat([seasons_eloh_rating_df, eloh_rating_df], axis=1)
 
-
     for first_word in first_words:
         write_string = "%s,%s," % (first_word, season)
         write_string += ",".join(["%.5f" % e for e in accuracy_dictionary[first_word]])
@@ -315,6 +332,7 @@ for season in [2008]:
 
 
 seasons_margin_rating_df.to_csv("MarginRatingsOutput.csv", index=True)  # Index is the team names
+seasons_margin_std_df.to_csv("MarginStdOutput.csv", index=True)
 seasons_elod_rating_df.to_csv("EloDRatingsOutput.csv", index=True)
 seasons_elol_rating_df.to_csv("EloLRatingsOutput.csv", index=True)
 seasons_eloh_rating_df.to_csv("EloHRatingsOutput.csv", index=True)

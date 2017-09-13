@@ -102,6 +102,27 @@ def create_sample_data(input_filename="NBAPointSpreadsAugmented.csv", output_fil
     log_reg_continuous.to_csv(output_filename, index=False)
 
 
+def replace_design_joint_latent(joint_design_matrix, indicators, jz):
+    """
+    Function for replacing the offense and defense latent variables of a single row of the design matrix with potentially new latent variables in z
+    :param joint_design_matrix: transformed data for predictions/numerical calculations (N x d matrix)
+    :param indicators: Index numbers of away, home pairs for each example (N x 2 matrix)
+    :param jz: latent variable vector, with all offense ratings then all defense ratings. So team i has offense at position i and defense at position i + number_teams
+    :return: joint_design matrix: changing the away/home offense/defense latent variables to match potential updates to latent variable vector jz
+    """
+
+    num_teams = int(len(jz) / 2)  # Since Offense, Defense rating per team
+
+    for index in joint_design_matrix.index:
+        offset = joint_design_matrix.index[0]
+        joint_design_matrix.loc[index, "AwayOffense"] = jz[indicators[index - offset, 0]]
+        joint_design_matrix.loc[index, "HomeDefense"] = jz[indicators[index - offset, 1] + num_teams]
+        joint_design_matrix.loc[index, "HomeOffense"] = jz[indicators[index - offset, 1]]
+        joint_design_matrix.loc[index, "AwayDefense"] = jz[indicators[index - offset, 0] + num_teams]
+
+    return joint_design_matrix
+
+
 def replace_design_latent(design_matrix, indicators, z):
     """
     Function for replacing the latent variables of a single row of the design matrix with potentially new latent variables in z
@@ -184,15 +205,25 @@ def load_data(input_filename="NBAPointSpreadsAugmented.csv", response_type="marg
     # Initializing team ratings
     p_means = np.zeros((team_number,1))
     p_vars = np.ones((team_number,1)) * 3.63 # 3.63 is variance of margin from dataset
-    initial_z = np.random.normal(loc=0,scale=1,size=(team_number,1))
+    initial_z = np.random.normal(loc=0,scale=1,size=(team_number, 1))
+    initial_joint_z = np.random.normal(loc=50, scale=3, size=(team_number*2, 1))
 
     # Creating design matrix
     design_matrix = pd.DataFrame()
-    design_matrix["AwayRating"] = np.zeros(design_matrix.shape[0])
-    design_matrix["HomeRating"] = np.zeros(design_matrix.shape[0])
+    design_matrix["AwayRating"] = np.zeros(indicator_matrix.shape[0])
+    design_matrix["HomeRating"] = np.zeros(indicator_matrix.shape[0])
     design_matrix["AwayRest"] = data.loc[:,"AwayRest"].copy()
     design_matrix["HomeRest"] = data.loc[:,"HomeRest"].copy()
     design_matrix = replace_design_latent(design_matrix, indicator_matrix, initial_z)
+
+    joint_design_matrix = pd.DataFrame()
+    joint_design_matrix["AwayOffense"] = np.zeros(indicator_matrix.shape[0])
+    joint_design_matrix["HomeDefense"] = np.zeros(indicator_matrix.shape[0])
+    joint_design_matrix["HomeOffense"] = np.zeros(indicator_matrix.shape[0])
+    joint_design_matrix["AwayDefense"] = np.zeros(indicator_matrix.shape[0])
+    joint_design_matrix["AwayRest"] = data.loc[:,"AwayRest"].copy()
+    joint_design_matrix["HomeRest"] = data.loc[:,"HomeRest"].copy()
+    joint_design_matrix = replace_design_joint_latent(joint_design_matrix, indicator_matrix, initial_joint_z)
 
     #np.array(response).reshape(-1,1)
     return design_matrix, response_dict, indicator_matrix, p_means, p_vars, initial_z, team_dict, baseline_dict
