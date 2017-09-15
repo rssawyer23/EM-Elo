@@ -5,6 +5,7 @@ import gradient_descent as gd
 from sklearn.linear_model import LinearRegression
 import data_engineering as de
 import datetime
+import scipy.stats as ss
 
 
 def elo_calculate_home_win_prob(away_rating, home_rating, home_offset=0.5):  # should be able to use this in an 'apply' context
@@ -142,8 +143,15 @@ def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, t
 
 def calculate_test_accuracy(latent_z, model, indicators, design_matrix, response):
     input_matrix = de.replace_design_latent(design_matrix=design_matrix, indicators=indicators, z=latent_z).copy()
+    predictions = model.predict(X=input_matrix)
+    squared_errors = (predictions - response) ** 2
     accuracy = model.score(X=input_matrix, y=response)
-    return accuracy
+    return accuracy, squared_errors[:, 0]  #Reshaping the squared errors to be of (x,) instead of (x,1) (for concatenation with empty list)
+
+
+def calculate_team_variances(z_std, indicators):
+    var_array = np.apply_along_axis(lambda row: z_std[row[0]]**2 + z_std[row[1]]**2, axis=1, arr=indicators)
+    return var_array
 
 
 def elo_test_accuracy(latent_z, indicators, design_matrix, response):
@@ -219,6 +227,9 @@ for i in np.arange(start_percent, 1.0, interval_size):
     result_file.write(",Train%.2f%%" % i)
 result_file.write("\n")
 
+corr_file = open("VarianceAccuracyCorrelations.csv", 'w')
+corr_file.write("Season,Correlation,p-value\n")
+
 seasons_margin_rating_df = initialize_team_rating_df(latent_team_dictionary, z)
 seasons_margin_std_df = initialize_team_rating_df(latent_team_dictionary, z)
 seasons_elod_rating_df = initialize_team_rating_df(latent_team_dictionary, z)
@@ -254,6 +265,8 @@ for season in [2008]:
     season_joint_baseline = baseline_dict["Joint"].loc[season_row_dictionary[season], :]
     season_indicators = indicators[season_row_dictionary[season], :]
     season_games = season_x.shape[0]
+    season_errors = np.array([])
+    season_variances = np.array([])
 
     accuracy_dictionary = dict()
     for w in first_words:
@@ -282,7 +295,10 @@ for season in [2008]:
         ## RUNNING MARGIN MODEL AND BASELINE
         season_z, margin_train, season_lm, season_z_std = fit_margin_model(season_x.iloc[0:train_end, :], season_margin_y[0:train_end], season_indicators[0:train_end, :],
                          p_means, p_vars, MAP=MAP, show=False)
-        test_accuracy = calculate_test_accuracy(season_z, season_lm, season_indicators[train_end:test_end, :], season_x.iloc[train_end:test_end, :], season_margin_y[train_end:test_end])
+        test_accuracy, test_errors = calculate_test_accuracy(season_z, season_lm, season_indicators[train_end:test_end, :], season_x.iloc[train_end:test_end, :], season_margin_y[train_end:test_end])
+        game_team_variances = calculate_team_variances(season_z_std, season_indicators[train_end:test_end, :])
+        season_errors = np.concatenate([season_errors, test_errors])
+        season_variances = np.concatenate([season_variances, game_team_variances])
         b_test_accuracy = calculate_binary_test_accuracy(season_z, season_lm, season_indicators[train_end:test_end, :], season_x.iloc[train_end:test_end, :], season_margin_y[train_end:test_end])
         baseline_accuracy = calculate_margin_baseline(season_margin_baseline[train_end:test_end], season_margin_y[train_end:test_end])
         b_baseline_accuracy = calculate_binary_margin_baseline(season_margin_baseline[train_end:test_end], season_margin_y[train_end:test_end])
@@ -329,6 +345,9 @@ for season in [2008]:
         write_string = "%s,%s," % (first_word, season)
         write_string += ",".join(["%.5f" % e for e in accuracy_dictionary[first_word]])
         result_file.write(write_string + "\n")
+
+    corr_test = ss.pearsonr(x=season_errors,y =season_variances)
+    corr_file.write("%s,%.4f,%.4f\n" % (season, corr_test[0], corr_test[1]))
 
 
 seasons_margin_rating_df.to_csv("MarginRatingsOutput.csv", index=True)  # Index is the team names
