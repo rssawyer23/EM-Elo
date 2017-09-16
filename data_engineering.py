@@ -210,7 +210,7 @@ def load_data(input_filename="NBAPointSpreadsAugmented.csv",
     p_means = np.zeros((team_number,1))
     p_vars = np.ones((team_number,1)) * 3.63 # 3.63 is variance of margin from dataset
     initial_z = np.random.normal(loc=0,scale=1,size=(team_number, 1))
-    initial_joint_z = np.random.normal(loc=50, scale=3, size=(team_number*2, 1))
+    initial_joint_z = np.random.normal(loc=0, scale=1, size=(team_number*2, 1))
 
     # Creating design matrix
     design_matrix = pd.DataFrame()
@@ -232,7 +232,7 @@ def load_data(input_filename="NBAPointSpreadsAugmented.csv",
     joint_design_matrix = replace_design_joint_latent(joint_design_matrix, indicator_matrix, initial_joint_z)
 
     #np.array(response).reshape(-1,1)
-    return design_matrix, response_dict, indicator_matrix, p_means, p_vars, initial_z, team_dict, baseline_dict
+    return design_matrix, joint_design_matrix, response_dict, indicator_matrix, p_means, p_vars, initial_z, team_dict, baseline_dict
 
 
 def parse_seasons(input_filename, season_colname=" Season"):
