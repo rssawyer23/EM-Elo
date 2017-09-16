@@ -169,7 +169,10 @@ def create_indicator_matrix(original_matrix, away_colname="Away Team", home_coln
     return np.array(indicator_list), counter, team_dict
 
 
-def load_data(input_filename="NBAPointSpreadsAugmented.csv", response_type="margin", away_points=" Away Points", home_points=" Home Points"):
+def load_data(input_filename="NBAPointSpreadsAugmented.csv",
+              away_points=" Away Points", home_points=" Home Points",
+              spread_col=" Spread (Relative to Away)", over_under=" Over/Under",
+              include_rest=True):
     """
     Function for returning useful arguments for other functions
     :param input_filename: string for the filename containing the csv of game data
@@ -197,11 +200,12 @@ def load_data(input_filename="NBAPointSpreadsAugmented.csv", response_type="marg
     response_dict["Joint"] = data.loc[:, [home_points, away_points]]
 
     baseline_dict = dict()
-    baseline_dict["Margin"] = data.loc[:," Spread (Relative to Away)"]
-    jbaseline = pd.DataFrame()
-    jbaseline[home_points] = data.loc[:, " Over/Under"] / 2.0 + data.loc[:, " Spread (Relative to Away)"] / 2.0
-    jbaseline[away_points] = data.loc[:, " Over/Under"] / 2.0 - data.loc[:, " Spread (Relative to Away)"] / 2.0
-    baseline_dict["Joint"] = jbaseline
+    if spread_col is not None and over_under is not None:
+        baseline_dict["Margin"] = data.loc[:, spread_col]
+        jbaseline = pd.DataFrame()
+        jbaseline[home_points] = data.loc[:, over_under] / 2.0 + data.loc[:, spread_col] / 2.0
+        jbaseline[away_points] = data.loc[:, over_under] / 2.0 - data.loc[:, spread_col] / 2.0
+        baseline_dict["Joint"] = jbaseline
     # Initializing team ratings
     p_means = np.zeros((team_number,1))
     p_vars = np.ones((team_number,1)) * 3.63 # 3.63 is variance of margin from dataset
@@ -212,8 +216,9 @@ def load_data(input_filename="NBAPointSpreadsAugmented.csv", response_type="marg
     design_matrix = pd.DataFrame()
     design_matrix["AwayRating"] = np.zeros(indicator_matrix.shape[0])
     design_matrix["HomeRating"] = np.zeros(indicator_matrix.shape[0])
-    design_matrix["AwayRest"] = data.loc[:,"AwayRest"].copy()
-    design_matrix["HomeRest"] = data.loc[:,"HomeRest"].copy()
+    if include_rest:
+        design_matrix["AwayRest"] = data.loc[:,"AwayRest"].copy()
+        design_matrix["HomeRest"] = data.loc[:,"HomeRest"].copy()
     design_matrix = replace_design_latent(design_matrix, indicator_matrix, initial_z)
 
     joint_design_matrix = pd.DataFrame()
@@ -221,8 +226,9 @@ def load_data(input_filename="NBAPointSpreadsAugmented.csv", response_type="marg
     joint_design_matrix["HomeDefense"] = np.zeros(indicator_matrix.shape[0])
     joint_design_matrix["HomeOffense"] = np.zeros(indicator_matrix.shape[0])
     joint_design_matrix["AwayDefense"] = np.zeros(indicator_matrix.shape[0])
-    joint_design_matrix["AwayRest"] = data.loc[:,"AwayRest"].copy()
-    joint_design_matrix["HomeRest"] = data.loc[:,"HomeRest"].copy()
+    if include_rest:
+        joint_design_matrix["AwayRest"] = data.loc[:,"AwayRest"].copy()
+        joint_design_matrix["HomeRest"] = data.loc[:,"HomeRest"].copy()
     joint_design_matrix = replace_design_joint_latent(joint_design_matrix, indicator_matrix, initial_joint_z)
 
     #np.array(response).reshape(-1,1)
