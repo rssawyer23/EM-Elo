@@ -93,7 +93,9 @@ def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, t
     # PARAM VECTOR SHOULD BE AWAY COEF, HOME COEF, AWAY REST COEF, HOME REST COEF
     # SET THIS IN A SMARTER WAY (VARIABLE LENGTH FOR COMPATIBILITY WITH OTHER DATASETS
     lm.coef_ = np.array([[-1.0, 1.0, -0.5, 0.5]])
-    #lm.fit(X=x, y=y)
+    if x.shape[1] < len(lm.coef_[0]):
+        lm.coef_ = np.array([lm.coef_[0][:(x.shape[1])]])
+
     param_vector = np.append(arr=lm.coef_, values=np.var(y)).reshape((-1, 1))
 
     change = tol + 1
@@ -146,7 +148,7 @@ def fit_margin_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, t
     return new_z, new_acc, lm, z_std
 
 
-def fit_joint_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, tol=1e-07, max_iter=1):
+def fit_joint_model(x, y, indicators, p_means, p_vars, a_cols, h_cols, MAP=False, show=False, tol=1e-07, max_iter=1, int_a=97., int_h=100.):
     """
     Performs the Expectation-Maximization Algorithm for the Joint Model (regressions for AwayScore and HomeScore)
         Expectation = Calculate the optimal latent variables for each team's offense and defense given the linear model parameters
@@ -168,13 +170,18 @@ def fit_joint_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, to
     # Initializing linear model parameters
     lm_a = LinearRegression()
     lm_h = LinearRegression()
-    lm_a.intercept_ = np.array([97.])  # 97 is the average away score in dataset
-    lm_h.intercept_ = np.array([100.])  # 100 is the average home score in dataset
+
+    lm_a.intercept_ = np.array([int_a])
+    lm_h.intercept_ = np.array([int_h])
 
     # PARAM VECTOR SHOULD BE AWAY COEF, HOME COEF, AWAY REST COEF, HOME REST COEF
     # SET THIS IN A SMARTER WAY (VARIABLE LENGTH FOR COMPATIBILITY WITH OTHER DATASETS
     lm_a.coef_ = np.array([[1.0, -1.0, 0.5, -0.5]])
+    if len(a_cols) < len(lm_a.coef_[0]):
+        lm_a.coef_ = np.array([lm_a.coef_[0][:len(a_cols)]])
     lm_h.coef_ = np.array([[1.0, -1.0, -0.5, 0.5]])
+    if len(h_cols) < len(lm_h.coef_[0]):
+        lm_h.coef_ = np.array([lm_h.coef_[0][:len(h_cols)]])
 
     param_vector = dict()
     intercept = dict()
@@ -191,7 +198,7 @@ def fit_joint_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, to
     # Continue alternating between E and M steps until the algorithm converges or reaches the maximum amount of iterations
     while change > tol and iterations < max_iter:
         start_acc, away_r2, home_r2 = calculate_joint_accuracy(X=old_x, y=y, lm_a=lm_a, lm_h=lm_h,
-                                                               a_cols=AWAY_SCORE_COLUMNS, h_cols=HOME_SCORE_COLUMNS)
+                                                               a_cols=a_cols, h_cols=h_cols)
         if show:
             print("Away Coefficients")
             print(lm_a.intercept_)
@@ -208,13 +215,13 @@ def fit_joint_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, to
                                                      weights=np.ones(indicators.shape[0]).reshape((-1, 1)), z=new_z,
                                                      prior_means=p_means, prior_vars=p_vars, MAP=MAP, show=show,
                                                      newton_update=False,
-                                                     joint=True, a_cols=AWAY_SCORE_COLUMNS, h_cols=HOME_SCORE_COLUMNS)
+                                                     joint=True, a_cols=a_cols, h_cols=h_cols)
 
         new_x = de.replace_design_joint_latent(joint_design_matrix=old_x, indicators=indicators, jz=new_z)
 
         # Internal checks to make sure gradient descent step improved model
         finish_acc, finish_away_r2, finish_home_r2 = calculate_joint_accuracy(X=new_x, y=y, lm_a=lm_a, lm_h=lm_h,
-                                                                              a_cols=AWAY_SCORE_COLUMNS, h_cols=HOME_SCORE_COLUMNS)
+                                                                              a_cols=a_cols, h_cols=h_cols)
         if show:
             print("EM Iteration %d after gradient descent accuracy %.5f" % (iterations, finish_acc))
         if finish_away_r2 < away_r2 and finish_home_r2 < home_r2:
@@ -224,8 +231,8 @@ def fit_joint_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, to
             print("Expectation Step Accuracy Improvement: %.5f" % (finish_acc - start_acc))
 
         # Maximization step - solving for the linear model parameters given the latent team variables (z)
-        lm_a.fit(X=new_x.loc[:, AWAY_SCORE_COLUMNS], y=y.loc[:, " Away Points"])
-        lm_h.fit(X=new_x.loc[:, HOME_SCORE_COLUMNS], y=y.loc[:, " Home Points"])
+        lm_a.fit(X=new_x.loc[:, a_cols], y=y.loc[:, " Away Points"])
+        lm_h.fit(X=new_x.loc[:, h_cols], y=y.loc[:, " Home Points"])
         if show:
             print("Away Coefficients")
             print(lm_a.intercept_)
@@ -239,8 +246,8 @@ def fit_joint_model(x, y, indicators, p_means, p_vars, MAP=False, show=False, to
         intercept["Away"] = lm_a.intercept_
         intercept["Home"] = lm_h.intercept_
         new_acc, new_away_r2, new_home_r2 = calculate_joint_accuracy(X=new_x, y=y, lm_a=lm_a, lm_h=lm_h,
-                                                                              a_cols=AWAY_SCORE_COLUMNS,
-                                                                              h_cols=HOME_SCORE_COLUMNS)
+                                                                              a_cols=a_cols,
+                                                                              h_cols=h_cols)
         change = new_acc - finish_acc
         if show:
             print("Maximization Step Accuracy Improvement: %.5f" % change)
@@ -282,6 +289,7 @@ def calculate_r2(predictions, response):  # Now this is the same as calculate_ma
     tss = np.sum((np.mean(response) - response)**2)
     r2 = 1 - rss/tss
     return r2
+
 
 def calculate_test_accuracy(latent_z, model, indicators, design_matrix, response):
     input_matrix = de.replace_design_latent(design_matrix=design_matrix, indicators=indicators, z=latent_z).copy()
@@ -349,6 +357,7 @@ def generate_joint_rating_df(latent_team_dict, joint_z, std_z, show=True):
         print(team_rating_df.head())
     return team_rating_df
 
+
 def initialize_team_rating_df(latent_team_dict, z_vector):
     sortable_team_dict = dict()
     teams = list(latent_team_dict.keys())
@@ -368,10 +377,13 @@ def calculate_binary_test_accuracy(latent_z, model, indicators, design_matrix, r
 
 
 def calculate_joint_baseline(predictions, actual):  # Assumes away and home score in same index location (0 and 1)
-    rss = np.sum((predictions.iloc[:,0] - actual.iloc[:,0])**2) + np.sum((predictions.iloc[:,1] - actual.iloc[:,1])**2)
-    tss = np.sum((actual.iloc[:,0].mean() - actual.iloc[:,0])**2) + np.sum((actual.iloc[:,1].mean() - actual.iloc[:,1])**2)
-    r2 = 1 - rss / tss
-    return r2
+    arss = np.sum((predictions.iloc[:,0] - actual.iloc[:,0])**2)
+    hrss = np.sum((predictions.iloc[:,1] - actual.iloc[:,1])**2)
+    atss = np.sum((actual.iloc[:,0].mean() - actual.iloc[:,0])**2)
+    htss = np.sum((actual.iloc[:,1].mean() - actual.iloc[:,1])**2)
+    ar2 = 1 - arss / atss
+    hr2 = 1 - hrss / htss
+    return ar2, hr2
 
 if __name__ == "__main__":
     # Load data into appropriate format
@@ -420,11 +432,10 @@ if __name__ == "__main__":
     MAP = False
     model_type = "Margin"
 
-
     accuracy_results = dict()
     model_string = "%s-%s" % (model_type, "MLE" if not MAP else "MAP")
     first_words = ["Margin-MLE", "Margin-MLE-Binary", "Margin-Baseline", "Margin-Baseline-Binary", "Margin-MLE-Train",
-                   "Binary-EloL", "Binary-EloH", "Binary-EloD", "Joint-Baseline", "Joint-MLE", "Joint-Away", "Joint-Home"]
+                   "Binary-EloL", "Binary-EloH", "Binary-EloD", "Joint-Baseline-Away","Joint-Baseline-Home", "Joint-MLE", "Joint-Away", "Joint-Home"]
 
     for season in [2008, 2009, 2010, 2011, 2012]:
         season_x = x.loc[season_row_dictionary[season], :]
@@ -451,9 +462,6 @@ if __name__ == "__main__":
             train_end = int((start_percent + interval_size * iteration) * season_games)
             test_end = int(train_end + season_games * interval_size)
             season_interval = "%d%%-%d%%" % (train_end / season_games * 100, test_end / season_games * 100)
-
-            j_baseline_accuracy = calculate_joint_baseline(season_joint_baseline.loc[train_end:test_end, :],
-                                                           season_joint_y.loc[train_end:test_end, :])
 
             # ## RUNNING BINARY MODEL AND BASELINE
             # season_z, margin_train, season_lm = fit_binary_model(season_x.iloc[0:train_end, :], season_y[0:train_end],
@@ -517,12 +525,13 @@ if __name__ == "__main__":
             season_joint_z, joint_train, season_lm_a, season_lm_h, season_joint_z_std = fit_joint_model(season_joint_x.iloc[0:train_end, :], season_joint_y.iloc[0:train_end,:], season_indicators[0:train_end, :],
                              joint_p_means, joint_p_vars, MAP=MAP, show=False)
             # test accuracy
-            input_matrix = de.replace_design_joint_latent(joint_design_matrix=season_joint_x.iloc[train_end:test_end, :], indicators=indicators[train_end:test_end,:],
+            input_matrix = de.replace_design_joint_latent(joint_design_matrix=season_joint_x.iloc[train_end:test_end, :], indicators=season_indicators[train_end:test_end,:],
                                                     jz=season_joint_z).copy()
             joint_test_accuracy, joint_away, joint_home = calculate_joint_accuracy(X=input_matrix, y=season_joint_y.iloc[train_end:test_end, :],
                                                            lm_a=season_lm_a, lm_h=season_lm_h, a_cols=AWAY_SCORE_COLUMNS, h_cols=HOME_SCORE_COLUMNS)
-            j_baseline_accuracy = calculate_joint_baseline(season_joint_baseline.loc[train_end:test_end, :], season_joint_y.loc[train_end:test_end, :])
-            accuracy_dictionary["Joint-Baseline"].append(j_baseline_accuracy)
+            j_baseline_away_accuracy, j_baseline_home_accuracy = calculate_joint_baseline(season_joint_baseline.loc[train_end:test_end, :], season_joint_y.loc[train_end:test_end, :])
+            accuracy_dictionary["Joint-Baseline-Away"].append(j_baseline_away_accuracy)
+            accuracy_dictionary["Joint-Baseline-Home"].append(j_baseline_home_accuracy)
             accuracy_dictionary["Joint-Away"].append(joint_away)
             accuracy_dictionary["Joint-Home"].append(joint_home)
             accuracy_dictionary["Joint-MLE"].append(joint_test_accuracy)
