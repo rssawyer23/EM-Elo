@@ -115,7 +115,7 @@ def margin_model_derivative_z(response, design_matrix, param_vector, intercept, 
     # REQUIRES AWAY AND HOME COEFFICIENTS TO BE IN PARAM_VECTOR[0] AND PARAM_VECTOR[1] RESPECTIVELY
     # REQUIRES MODEL PRECISION IN PARAM_VECTOR[-1]
     # OTHER DIMS OF PARAMETER VECTOR SHOULD MATCH DESIGN MATRIX COLUMNS
-    K_teams = int(len(z) / 2)
+    K_teams = len(z)
     gradient = np.zeros(K_teams).reshape((-1,1))
     second_gradient = np.zeros(K_teams).reshape((-1,1))
     predictions = design_matrix.dot(param_vector[:-1]) + intercept
@@ -159,7 +159,7 @@ def joint_model_derivative_z(response, design_matrix, a_cols, h_cols, param_vect
     :return: gradient vector of the log likelihood with respect to the model parameters (to be used in gradient descent update step)
     """
 
-    # Calcuating necessary elements for gradient calculation
+    # Calculating necessary elements for gradient calculation
     # REQUIRES AWAY AND HOME COEFFICIENTS TO BE IN PARAM_VECTOR[0] AND PARAM_VECTOR[1] RESPECTIVELY
     # REQUIRES MODEL PRECISION IN PARAM_VECTOR[-1]
     # OTHER DIMS OF PARAMETER VECTOR SHOULD MATCH DESIGN MATRIX COLUMNS
@@ -212,7 +212,7 @@ def joint_model_derivative_z(response, design_matrix, a_cols, h_cols, param_vect
     return gradient, second_gradient, np.array([np.std(team_game_updates) for team_game_updates in team_updates])
 
 
-def latent_margin_optimization(response, design_matrix, param_vector, intercept, indicators, weights, z, prior_means, prior_vars, a_cols=None, h_cols=None, joint=False, MAP=False, show=False, newton_update=True, gamma=0.0001, tol=1e-06, max_iter=10):
+def latent_margin_optimization(response, design_matrix, param_vector, intercept, indicators, weights, z, prior_means, prior_vars, a_cols=None, h_cols=None, joint=False, MAP=False, show=False, newton_update=True, gamma=6.0, tol=1e-01, max_iter=100):
     """
     Function for performing numerical optimization on latent variables of the margin model
     (Finding the latent variable vector that minimizes the log-likelihood of the margin model given fixed model parameters)
@@ -236,6 +236,7 @@ def latent_margin_optimization(response, design_matrix, param_vector, intercept,
     iterations = 0
     start = datetime.datetime.now()
     gradient_std = np.zeros(len(z))
+    p_z_change = 0
     # Run until no change in latent variables or a maximum amount of iterations reached
     while z_change > tol and iterations < max_iter:
         iterations += 1
@@ -253,7 +254,11 @@ def latent_margin_optimization(response, design_matrix, param_vector, intercept,
             z += gamma * np.array(z_gradient).reshape(-1,1)
         if newton_update:
             z -= z_gradient / z_second_gradient
+
         z_change = np.linalg.norm(z - prev_z)
+        if z_change > p_z_change or (p_z_change - z_change) < 1:
+            gamma = gamma / 2.
+        p_z_change = z_change
 
         # Make this an if statement to check if doing joint or margin
         if not joint:
