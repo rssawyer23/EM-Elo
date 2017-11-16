@@ -212,7 +212,7 @@ def joint_model_derivative_z(response, design_matrix, a_cols, h_cols, param_vect
     return gradient, second_gradient, np.array([np.std(team_game_updates) for team_game_updates in team_updates])
 
 
-def latent_margin_optimization(response, design_matrix, param_vector, intercept, indicators, weights, z, prior_means, prior_vars, a_cols=None, h_cols=None, joint=False, MAP=False, show=False, newton_update=True, gamma=6.0, tol=1e-01, max_iter=100):
+def latent_margin_optimization(response, design_matrix, param_vector, intercept, indicators, weights, z, prior_means, prior_vars, a_cols=None, h_cols=None, joint=False, MAP=False, show=False, newton_update=False, gamma=6.0, tol=1e-01, max_iter=100):
     """
     Function for performing numerical optimization on latent variables of the margin model
     (Finding the latent variable vector that minimizes the log-likelihood of the margin model given fixed model parameters)
@@ -256,11 +256,10 @@ def latent_margin_optimization(response, design_matrix, param_vector, intercept,
             z -= z_gradient / z_second_gradient
 
         z_change = np.linalg.norm(z - prev_z)
-        if z_change > p_z_change or (p_z_change - z_change) < 1:
+        if z_change > p_z_change or (p_z_change - z_change) < 1:  # Momentum adjustment calculations
             gamma = gamma / 2.
         p_z_change = z_change
 
-        # Make this an if statement to check if doing joint or margin
         if not joint:
             design_matrix = replace_design_latent(design_matrix=design_matrix, indicators=indicators, z=z)
         else:  # Is joint

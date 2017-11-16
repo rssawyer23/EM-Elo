@@ -14,7 +14,7 @@ HOME_SCORE_COLUMNS = ["HomeOffense", "AwayDefense", "AwayRest", "HomeRest"]
 
 def elo_calculate_home_win_prob(away_rating, home_rating, home_offset=0.5):  # should be able to use this in an 'apply' context
     # Given away and home ratings, calculate probability of home win
-    return 1. / (1. + math.pow(math.e, away_rating - (home_rating + home_offset)))
+    return 1. / (1. + math.pow(10, (away_rating - (home_rating + home_offset))/400.))
 
 
 def calculate_temperature(iteration, start_k=16, decay_factor=0.0005):
@@ -37,11 +37,9 @@ def fit_elo_model(x, y, indicators, p_means, mode="Decay", k_step_high=32, k_ste
     :return: final latent variables from the Elo model
     """
 
-    new_z = np.copy(p_means)
-    if show:
-        print("RESPONSE LENGTH: %d INDICATOR LENGTH: %d" % (len(y), indicators.shape[0]))
+    new_z = np.copy(p_means) + 1500.
 
-    decay_factor = -1 * math.log1p(k_step_low/k_step_high) / indicators.shape[0]
+    decay_factor = -1 * math.log1p(k_step_low / k_step_high) / indicators.shape[0]
     for i in range(len(y)):  # For each game in dataset
         # Get team ratings of teams playing
         away_elo = new_z[indicators[i][0]]
@@ -55,7 +53,7 @@ def fit_elo_model(x, y, indicators, p_means, mode="Decay", k_step_high=32, k_ste
         error = home_win - expected_result
         if mode == "Decay":
             k_param = calculate_temperature(iteration=i, start_k=k_step_high, decay_factor=decay_factor)
-        elif mode=="High":
+        elif mode == "High":
             k_param = k_step_high
         else:  # mode=="Low"
             k_param = k_step_low
@@ -197,7 +195,7 @@ def fit_joint_model(x, y, indicators, p_means, p_vars, a_cols, h_cols, MAP=False
 
     # Continue alternating between E and M steps until the algorithm converges or reaches the maximum amount of iterations
     while change > tol and iterations < max_iter:
-        start_acc, away_r2, home_r2 = calculate_joint_accuracy(X=old_x, y=y, lm_a=lm_a, lm_h=lm_h,
+        start_acc, away_r2, home_r2, start_mae, away_mar, home_mae = calculate_joint_accuracy(X=old_x, y=y, lm_a=lm_a, lm_h=lm_h,
                                                                a_cols=a_cols, h_cols=h_cols)
         if show:
             print("Away Coefficients")
@@ -220,7 +218,7 @@ def fit_joint_model(x, y, indicators, p_means, p_vars, a_cols, h_cols, MAP=False
         new_x = de.replace_design_joint_latent(joint_design_matrix=old_x, indicators=indicators, jz=new_z)
 
         # Internal checks to make sure gradient descent step improved model
-        finish_acc, finish_away_r2, finish_home_r2 = calculate_joint_accuracy(X=new_x, y=y, lm_a=lm_a, lm_h=lm_h,
+        finish_acc, finish_away_r2, finish_home_r2, finish_mae, finish_away_mae, finish_home_mae = calculate_joint_accuracy(X=new_x, y=y, lm_a=lm_a, lm_h=lm_h,
                                                                               a_cols=a_cols, h_cols=h_cols)
         if show:
             print("EM Iteration %d after gradient descent accuracy %.5f" % (iterations, finish_acc))
@@ -245,7 +243,7 @@ def fit_joint_model(x, y, indicators, p_means, p_vars, a_cols, h_cols, MAP=False
         param_vector["Home"] = np.append(arr=lm_h.coef_, values=np.std(y.loc[:, " Home Points"])).reshape((-1, 1))
         intercept["Away"] = lm_a.intercept_
         intercept["Home"] = lm_h.intercept_
-        new_acc, new_away_r2, new_home_r2 = calculate_joint_accuracy(X=new_x, y=y, lm_a=lm_a, lm_h=lm_h,
+        new_acc, new_away_r2, new_home_r2, new_mae, new_away_mae, new_home_mae = calculate_joint_accuracy(X=new_x, y=y, lm_a=lm_a, lm_h=lm_h,
                                                                               a_cols=a_cols,
                                                                               h_cols=h_cols)
         change = new_acc - finish_acc
@@ -280,7 +278,10 @@ def calculate_joint_accuracy(X, y, lm_a, lm_h, a_cols, h_cols):
     margin_r2 = calculate_r2(margin_predictions, y.loc[:, " Home Points"] - y.loc[:, " Away Points"])
     away_r2 = calculate_r2(away_predictions, y.loc[:, " Away Points"])
     home_r2 = calculate_r2(home_predictions, y.loc[:, " Home Points"])
-    return margin_r2, away_r2, home_r2
+    margin_mae = np.mean(np.abs(margin_predictions.reshape(-1,1) - (y.loc[:, " Home Points"] - y.loc[:, " Away Points"]).values.reshape(-1,1)))
+    home_mae = np.mean(np.abs(home_predictions.reshape(-1,1) - y.loc[:, " Home Points"].values.reshape(-1,1)))
+    away_mae = np.mean(np.abs(away_predictions.reshape(-1,1) - y.loc[:, " Away Points"].values.reshape(-1,1)))
+    return margin_r2, away_r2, home_r2, margin_mae, away_mae, home_mae
 
 
 def calculate_r2(predictions, response):  # Now this is the same as calculate_margin_baseline
@@ -295,8 +296,9 @@ def calculate_test_accuracy(latent_z, model, indicators, design_matrix, response
     input_matrix = de.replace_design_latent(design_matrix=design_matrix, indicators=indicators, z=latent_z).copy()
     predictions = model.predict(X=input_matrix)
     squared_errors = (predictions - response) ** 2
+    mae = np.mean(np.abs(predictions - response))
     accuracy = model.score(X=input_matrix, y=response)
-    return accuracy, squared_errors[:, 0]  #Reshaping the squared errors to be of (x,) instead of (x,1) (for concatenation with empty list)
+    return accuracy, mae, squared_errors[:, 0]  #Reshaping the squared errors to be of (x,) instead of (x,1) (for concatenation with empty list)
 
 
 def calculate_team_variances(z_std, indicators):
@@ -318,7 +320,8 @@ def calculate_margin_baseline(spreads, actual):
     rss = np.sum((spreads.reshape(-1, 1) - actual)**2)
     tss = np.sum((np.mean(actual) - actual)**2)
     r2 = 1 - rss / tss
-    return r2
+    mae = np.mean(np.abs(spreads.reshape(-1,1) - actual))
+    return r2, mae
 
 
 def calculate_binary_margin_baseline(spreads, actual):
@@ -434,8 +437,13 @@ if __name__ == "__main__":
 
     accuracy_results = dict()
     model_string = "%s-%s" % (model_type, "MLE" if not MAP else "MAP")
-    first_words = ["Margin-MLE", "Margin-MLE-Binary", "Margin-Baseline", "Margin-Baseline-Binary", "Margin-MLE-Train",
-                   "Binary-EloL", "Binary-EloH", "Binary-EloD", "Joint-Baseline-Away","Joint-Baseline-Home", "Joint-MLE", "Joint-Away", "Joint-Home"]
+    first_words = ["Margin-MLE", "Margin-MLE-MAE", "Margin-MLE-Binary",
+                   "Margin-Baseline", "Margin-Baseline-MAE"
+                   "Margin-Baseline-Binary", "Margin-MLE-Train",
+                   "Binary-EloL", "Binary-EloH", "Binary-EloD",
+                   "Joint-Baseline-Away","Joint-Baseline-Home",
+                   "Joint-MLE-R2", "Joint-Away-R2", "Joint-Home-R2",
+                   "Joint-MLE-MAE", "Joint-Away-MAE", "Joint-Home-MAE"]
 
     for season in [2008, 2009, 2010, 2011, 2012]:
         season_x = x.loc[season_row_dictionary[season], :]
@@ -458,6 +466,7 @@ if __name__ == "__main__":
         for w in first_words:
             accuracy_dictionary[w] = []
 
+        # Taking a small portion of next games to use as test set and games up to that point as training set
         for iteration in range(int((1-start_percent)/interval_size)):
             train_end = int((start_percent + interval_size * iteration) * season_games)
             test_end = int(train_end + season_games * interval_size)
@@ -481,17 +490,19 @@ if __name__ == "__main__":
             ## RUNNING MARGIN MODEL AND BASELINE
             season_z, margin_train, season_lm, season_z_std = fit_margin_model(season_x.iloc[0:train_end, :], season_margin_y[0:train_end], season_indicators[0:train_end, :],
                              p_means, p_vars, MAP=MAP, show=False)
-            test_accuracy, test_errors = calculate_test_accuracy(season_z, season_lm, season_indicators[train_end:test_end, :], season_x.iloc[train_end:test_end, :], season_margin_y[train_end:test_end])
+            test_accuracy, test_mae, test_errors = calculate_test_accuracy(season_z, season_lm, season_indicators[train_end:test_end, :], season_x.iloc[train_end:test_end, :], season_margin_y[train_end:test_end])
             game_team_variances = calculate_team_variances(season_z_std, season_indicators[train_end:test_end, :])
             season_errors = np.concatenate([season_errors, test_errors])
             season_variances = np.concatenate([season_variances, game_team_variances])
             b_test_accuracy = calculate_binary_test_accuracy(season_z, season_lm, season_indicators[train_end:test_end, :], season_x.iloc[train_end:test_end, :], season_margin_y[train_end:test_end])
-            baseline_accuracy = calculate_margin_baseline(season_margin_baseline[train_end:test_end], season_margin_y[train_end:test_end])
+            baseline_accuracy, baseline_mae = calculate_margin_baseline(season_margin_baseline[train_end:test_end], season_margin_y[train_end:test_end])
             b_baseline_accuracy = calculate_binary_margin_baseline(season_margin_baseline[train_end:test_end], season_margin_y[train_end:test_end])
             accuracy_dictionary["Margin-MLE-Train"].append(margin_train)
             accuracy_dictionary["Margin-MLE"].append(test_accuracy)
+            accuracy_dictionary["Margin-MLE-MAE"].append(test_mae)
             accuracy_dictionary["Margin-MLE-Binary"].append(b_test_accuracy)
             accuracy_dictionary["Margin-Baseline"].append(baseline_accuracy)
+            accuracy_dictionary["Margin-Baseline-MAE"].append(baseline_mae)
             accuracy_dictionary["Margin-Baseline-Binary"].append(b_baseline_accuracy)
 
             if show:
@@ -527,14 +538,17 @@ if __name__ == "__main__":
             # test accuracy
             input_matrix = de.replace_design_joint_latent(joint_design_matrix=season_joint_x.iloc[train_end:test_end, :], indicators=season_indicators[train_end:test_end,:],
                                                     jz=season_joint_z).copy()
-            joint_test_accuracy, joint_away, joint_home = calculate_joint_accuracy(X=input_matrix, y=season_joint_y.iloc[train_end:test_end, :],
+            joint_test_accuracy, joint_away, joint_home, joint_mae, joint_away_mae, joint_home_mae = calculate_joint_accuracy(X=input_matrix, y=season_joint_y.iloc[train_end:test_end, :],
                                                            lm_a=season_lm_a, lm_h=season_lm_h, a_cols=AWAY_SCORE_COLUMNS, h_cols=HOME_SCORE_COLUMNS)
             j_baseline_away_accuracy, j_baseline_home_accuracy = calculate_joint_baseline(season_joint_baseline.loc[train_end:test_end, :], season_joint_y.loc[train_end:test_end, :])
             accuracy_dictionary["Joint-Baseline-Away"].append(j_baseline_away_accuracy)
             accuracy_dictionary["Joint-Baseline-Home"].append(j_baseline_home_accuracy)
-            accuracy_dictionary["Joint-Away"].append(joint_away)
-            accuracy_dictionary["Joint-Home"].append(joint_home)
-            accuracy_dictionary["Joint-MLE"].append(joint_test_accuracy)
+            accuracy_dictionary["Joint-Away-R2"].append(joint_away)
+            accuracy_dictionary["Joint-Home-R2"].append(joint_home)
+            accuracy_dictionary["Joint-MLE-R2"].append(joint_test_accuracy)
+            accuracy_dictionary["Joint-Away-MAE"].append(joint_away_mae)
+            accuracy_dictionary["Joint-Home-MAE"].append(joint_home_mae)
+            accuracy_dictionary["Joint-MLE-MAE"].append(joint_mae)
 
             #Not appending, just returning the last dataframe of ratings
             joint_ratings = generate_joint_rating_df(latent_team_dictionary, season_joint_z, season_joint_z_std, show=False)

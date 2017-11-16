@@ -209,7 +209,7 @@ def load_data(input_filename="NBAPointSpreadsAugmented.csv",
     # Initializing team ratings
     p_means = np.zeros((team_number,1))
     p_vars = np.ones((team_number,1)) * 3.63 # 3.63 is variance of margin from dataset
-    initial_z = np.random.normal(loc=0,scale=1,size=(team_number, 1))
+    initial_z = np.random.normal(loc=0, scale=1,size=(team_number, 1))
     initial_joint_z = np.random.normal(loc=0, scale=1, size=(team_number*2, 1))
 
     # Creating design matrix
