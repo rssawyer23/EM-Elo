@@ -36,12 +36,12 @@ team_dict = {"Chicago":1500,
              "Minnesota":1350}
 
 
-def add_win(row):
-    return int(row[" Home Points"] > row[" Away Points"])
+def add_win(row, home_score_col=" Home Points", away_score_col=" Away Points"):
+    return int(row[home_score_col] > row[away_score_col])
 
 
-def add_margin(row):
-    return row[" Home Points"] - row[" Away Points"]
+def add_margin(row, home_score_col=" Home Points", away_score_col=" Away Points"):
+    return row[home_score_col] - row[away_score_col]
 
 
 def add_team_rest(team, date, season_start_default=5):
@@ -51,29 +51,34 @@ def add_team_rest(team, date, season_start_default=5):
         first = True
 
     if not first:  # Calculate difference between game date and team's last played date
-        difference = (date - last_played[team]).days
+        difference = (date - last_played[team]).days - 1
     else:
         difference = season_start_default
     last_played[team] = date  # Replace last played date with current date
-    if difference > season_start_default:
+    if difference > season_start_default or difference < 0:
         difference = season_start_default
     return difference
 
 
-def add_rest(row):
-    parsed_date = dateparser.parse(row[" Date"])
-    return pd.Series({"AwayRest": add_team_rest(row["Away Team"], parsed_date),
-                      "HomeRest": add_team_rest(row[" Home Team"], parsed_date)})
+def add_rest(row, date_col=" Date", home_team_col=" Home Team", away_team_col="Away Team"):
+    parsed_date = dateparser.parse(row[date_col])
+    return pd.Series({"AwayRest": add_team_rest(row[away_team_col], parsed_date),
+                      "HomeRest": add_team_rest(row[home_team_col], parsed_date)})
 
 
-def apply_adds(input_filename="NBAPointSpreadsReduced.csv", output_filename="NBAPointSpreadsAugmented.csv"):
-    new_cols = ["HomeWin", "HomeMargin", "HomeRest", "AwayRest"]
+def apply_adds(input_filename="NBAPointSpreadsReduced.csv", output_filename="NBAPointSpreadsAugmented.csv",
+               home_score_col=" Home Points", away_score_col=" Away Points",
+               home_team_col=" Home Team", away_team_col="Away Team"):
+    new_cols = ["Home-Win", "Home-Margin", "Home-Rest", "Away-Rest"]
     data = pd.read_csv(input_filename)
     for col in new_cols:
         data[col] = pd.Series([0]*data.shape[0])
-    data["HomeMargin"] = data.apply(func=add_margin, axis=1)
-    data["HomeWin"] = data.apply(func=add_win, axis=1)
-    data[["AwayRest", "HomeRest"]] = data.apply(add_rest, axis=1)
+    data["Home-Margin"] = data.apply(func=add_margin, axis=1,
+                                    home_score_col=home_score_col, away_score_col=away_score_col)
+    data["Home-Win"] = data.apply(func=add_win, axis=1,
+                                    home_score_col=home_score_col, away_score_col=away_score_col)
+    data[["Away-Rest", "Home-Rest"]] = data.apply(add_rest, axis=1, date_col="Date",
+                                 home_team_col=home_team_col, away_team_col=away_team_col)
 
     data.to_csv(output_filename, index=False)
 
@@ -172,6 +177,7 @@ def create_indicator_matrix(original_matrix, away_colname="Away Team", home_coln
 def load_data(input_filename="NBAPointSpreadsAugmented.csv",
               away_points=" Away Points", home_points=" Home Points",
               spread_col=" Spread (Relative to Away)", over_under=" Over/Under",
+              away_name="Away Team", home_name=" Home Team",
               include_rest=True):
     """
     Function for returning useful arguments for other functions
@@ -192,7 +198,7 @@ def load_data(input_filename="NBAPointSpreadsAugmented.csv",
     data = pd.read_csv(input_filename)
 
     # Getting indicator matrix
-    indicator_matrix, team_number, team_dict = create_indicator_matrix(data)
+    indicator_matrix, team_number, team_dict = create_indicator_matrix(data, away_name, home_name)
 
     response_dict = dict()
     response_dict["Binary"] = pd.Series(data.loc[:, home_points] > data.loc[:, away_points], dtype=int)
@@ -208,8 +214,8 @@ def load_data(input_filename="NBAPointSpreadsAugmented.csv",
         baseline_dict["Joint"] = jbaseline
     # Initializing team ratings
     p_means = np.zeros((team_number,1))
-    p_vars = np.ones((team_number,1)) * 3.63 # 3.63 is variance of margin from dataset
-    initial_z = np.random.normal(loc=0, scale=1,size=(team_number, 1))
+    p_vars = np.ones((team_number,1)) * 174.2 # 13.2 is std of margin from NBA dataset
+    initial_z = np.random.normal(loc=0, scale=1, size=(team_number, 1))
     initial_joint_z = np.random.normal(loc=0, scale=1, size=(team_number*2, 1))
 
     # Creating design matrix
@@ -255,4 +261,31 @@ def parse_seasons(input_filename, season_colname=" Season"):
     return season_row_dict
 
 
-#create_sample_data()
+def load_prior_ratings(latent_team_dictionary, filename, joint):
+    ratings_df = pd.read_csv(filename)
+    num_teams = len(latent_team_dictionary.keys())
+    array_length = num_teams * 2 if joint else num_teams
+    prior_array = np.zeros((array_length,1))
+    for i,row in ratings_df.iterrows():
+        try:
+            team_index = latent_team_dictionary[row.iloc[0]]
+            prior_array[team_index] = row.iloc[1]
+            if joint:
+                prior_array[team_index + num_teams] = row.iloc[2]
+        except KeyError:
+            pass  # Team not found in latent dictionary, defaults to 0
+    return prior_array
+
+if __name__ == "__main__":
+    input_path_base = "C:/Users/robsc/Documents/Data and Stats/ScrapedData/NBA/NBA%s_FullScores.csv"
+    output_path_base = "C:/Users/robsc/Documents/Data and Stats/ScrapedData/NBA/NBA%s_wRest.csv"
+    # for season in [1213, 1314, 1415, 1516, 1617]:
+    for season in [1718]:
+        in_file_path = input_path_base % season
+        out_file_path = output_path_base % season
+        apply_adds(input_filename=in_file_path, output_filename=out_file_path,
+                   home_score_col="Home-FinalScore", away_score_col="Away-FinalScore",
+                   home_team_col="Home-Name", away_team_col="Away-Name")
+        print("Finished %s Season" % season)
+
+
