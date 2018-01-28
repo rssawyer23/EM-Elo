@@ -151,7 +151,7 @@ def create_indicator_matrix(original_matrix, away_colname="Away Team", home_coln
     :param original_matrix: dataframe containing all of the team data
     :param away_colname: string for the column name of the dataframe containing the away team names
     :param home_colname: string for the column name of the dataframe containing the home team names
-    :return: the indicator matrix (n x 2), and the number of unique teams found, mapping from team name to index of latent vector
+    :return: the indicator matrix (n x 2), the number of unique teams found, and mapping from team name to index of latent vector
     """
     team_dict = dict()
     indicator_list = []
@@ -178,7 +178,7 @@ def load_data(input_filename="NBAPointSpreadsAugmented.csv",
               away_points=" Away Points", home_points=" Home Points",
               spread_col=" Spread (Relative to Away)", over_under=" Over/Under",
               away_name="Away Team", home_name=" Home Team",
-              include_rest=True):
+              include_rest=True, diff_mult=1.0, weight_col=None):
     """
     Function for returning useful arguments for other functions
     :param input_filename: string for the filename containing the csv of game data
@@ -202,8 +202,8 @@ def load_data(input_filename="NBAPointSpreadsAugmented.csv",
 
     response_dict = dict()
     response_dict["Binary"] = pd.Series(data.loc[:, home_points] > data.loc[:, away_points], dtype=int)
-    response_dict["Margin"] = pd.Series(data.loc[:, home_points] - data.loc[:, away_points], dtype=float)
-    response_dict["Joint"] = data.loc[:, [home_points, away_points]]
+    response_dict["Margin"] = pd.Series(diff_mult*(data.loc[:, home_points] - data.loc[:, away_points]), dtype=float)
+    response_dict["Joint"] = diff_mult*data.loc[:, [home_points, away_points]]
 
     baseline_dict = dict()
     if spread_col is not None and over_under is not None:
@@ -214,7 +214,7 @@ def load_data(input_filename="NBAPointSpreadsAugmented.csv",
         baseline_dict["Joint"] = jbaseline
     # Initializing team ratings
     p_means = np.zeros((team_number,1))
-    p_vars = np.ones((team_number,1)) * 174.2 # 13.2 is std of margin from NBA dataset
+    p_vars = np.ones((team_number,1)) * 350.0 # 13.2 is std of margin from NBA dataset
     initial_z = np.random.normal(loc=0, scale=1, size=(team_number, 1))
     initial_joint_z = np.random.normal(loc=0, scale=1, size=(team_number*2, 1))
 
@@ -237,8 +237,10 @@ def load_data(input_filename="NBAPointSpreadsAugmented.csv",
         joint_design_matrix["HomeRest"] = data.loc[:,"HomeRest"].copy()
     joint_design_matrix = replace_design_joint_latent(joint_design_matrix, indicator_matrix, initial_joint_z)
 
+    samp_weights = None if weight_col is None else np.array(data.loc[:, weight_col])
+
     #np.array(response).reshape(-1,1)
-    return design_matrix, joint_design_matrix, response_dict, indicator_matrix, p_means, p_vars, initial_z, team_dict, baseline_dict
+    return design_matrix, joint_design_matrix, response_dict, indicator_matrix, p_means, p_vars, initial_z, team_dict, baseline_dict, samp_weights
 
 
 def parse_seasons(input_filename, season_colname=" Season"):

@@ -143,7 +143,7 @@ def margin_model_derivative_z(response, design_matrix, param_vector, intercept, 
     return gradient, second_gradient, np.array([np.std(team_game_updates) for team_game_updates in team_updates])
 
 
-def joint_model_derivative_z(response, design_matrix, a_cols, h_cols, param_vector_a, param_vector_h, int_a, int_h, indicators, weights, z, prior_means, prior_vars, MAP=False):
+def joint_model_derivative_z(response, design_matrix, a_cols, h_cols, param_vector_a, param_vector_h, int_a, int_h, indicators, weights, z, prior_means, prior_vars, home_points=" Home Points", away_points=" Away Points", MAP=False):
     """
     Method for calculating the full dataset derivative of the log likelihood of the joint model, with respect to the latent team offense and defense variables
     :param response: A dataframe of dimension N x 2 with columns for AwayScore and HomeScore
@@ -169,13 +169,13 @@ def joint_model_derivative_z(response, design_matrix, a_cols, h_cols, param_vect
 
     # Away Score-based derivatives
     away_predictions = design_matrix.loc[:, a_cols].dot(param_vector_a[:-1]) + int_a
-    away_difference = response[" Away Points"].reshape(-1,1) - away_predictions
+    away_difference = response[away_points].reshape(-1,1) - away_predictions
     away_offense_derivatives = (param_vector_a[0] / param_vector_a[-1]) * away_difference
     home_defense_derivatives = (param_vector_a[1] / param_vector_a[-1]) * away_difference
 
     # Home Score-based derivatives
     home_predictions = design_matrix.loc[:, h_cols].dot(param_vector_h[:-1]) + int_h
-    home_difference = response[" Home Points"].reshape(-1,1) - home_predictions
+    home_difference = response[home_points].reshape(-1,1) - home_predictions
     home_offense_derivatives = (param_vector_h[0] / param_vector_h[-1]) * home_difference
     away_defense_derivatives = (param_vector_h[1] / param_vector_h[-1]) * home_difference
 
@@ -212,7 +212,7 @@ def joint_model_derivative_z(response, design_matrix, a_cols, h_cols, param_vect
     return gradient, second_gradient, np.array([np.std(team_game_updates) for team_game_updates in team_updates])
 
 
-def latent_margin_optimization(response, design_matrix, param_vector, intercept, indicators, weights, z, prior_means, prior_vars, a_cols=None, h_cols=None, joint=False, MAP=False, show=False, newton_update=False, gamma=6.0, tol=1e-01, max_iter=100):
+def latent_margin_optimization(response, design_matrix, param_vector, intercept, indicators, weights, z, prior_means, prior_vars, home_points=" Home Points", away_points=" Away Points", a_cols=None, h_cols=None, joint=False, MAP=False, show=False, newton_update=False, gamma=6.0, tol=1e-01, max_iter=100):
     """
     Function for performing numerical optimization on latent variables of the margin model
     (Finding the latent variable vector that minimizes the log-likelihood of the margin model given fixed model parameters)
@@ -247,7 +247,7 @@ def latent_margin_optimization(response, design_matrix, param_vector, intercept,
                                                    prior_means=prior_means, prior_vars=prior_vars, MAP=MAP)
         else:  # Is joint
             z_gradient, z_second_gradient, gradient_stds = joint_model_derivative_z(response, design_matrix, a_cols, h_cols, param_vector["Away"], param_vector["Home"], intercept["Away"], intercept["Home"], indicators, weights, z=prev_z,
-                                                   prior_means=prior_means, prior_vars=prior_vars, MAP=MAP)
+                                                   prior_means=prior_means, prior_vars=prior_vars, MAP=MAP, home_points=home_points, away_points=away_points)
 
         # Take a gradient step and calculate change in latent variable vector
         if not newton_update:

@@ -32,12 +32,13 @@ def season_train_test_models(input_filename, accuracy_output_filename, correlati
     start = datetime.datetime.now()
     # Should move data loading out of this function to make more accessible at high level for specifying data structure
     print("%s Loading Data..." % datetime.datetime.now())
-    season_x, season_joint_x, y_dict, season_indicators, sp_means, sp_vars, z, latent_team_dictionary, baseline_dict = \
+    season_x, season_joint_x, y_dict, season_indicators, sp_means, sp_vars, z, latent_team_dictionary, baseline_dict, samp_weights = \
         de.load_data(input_filename=input_filename,
                      away_points=load_dict["AwayPoints"], home_points=load_dict["HomePoints"],
                      spread_col=load_dict["Spread"], over_under=load_dict["OverUnder"],
                      away_name=load_dict["AwayName"], home_name=load_dict["HomeName"],
-                     include_rest=load_dict["RestAvailable"])
+                     include_rest=load_dict["RestAvailable"], diff_mult=load_dict["DifferenceMultiplier"],
+                     weight_col=load_dict["Weights"])
     team_list = list(latent_team_dictionary.keys())
     print("...Finished Loading Data %s seconds" % (datetime.datetime.now() - start).total_seconds())
 
@@ -82,6 +83,8 @@ def season_train_test_models(input_filename, accuracy_output_filename, correlati
 
     train_end = int((1 - test_size) * season_games)
     test_end = season_games - 1
+    print("Train Games per Team: %.2f" % (train_end / float(len(z))))
+    print("Test Games: %d" % (test_end - train_end))
 
     if evaluate_dictionary["Margin-Baseline"]:
         print("%s Training/Testing Baseline..." % datetime.datetime.now())
@@ -128,7 +131,7 @@ def season_train_test_models(input_filename, accuracy_output_filename, correlati
     if evaluate_dictionary["Margin"]:
         season_z, margin_train, season_lm, season_z_std = m.fit_margin_model(season_x.iloc[0:train_end, :],
                                                                              season_margin_y[0:train_end], season_indicators[0:train_end, :],
-                                     p_means, p_vars, max_iter=MAXIMUM_ITERATIONS, MAP=MAP, show=False)
+                                     p_means, p_vars, weights=samp_weights[0:train_end], max_iter=MAXIMUM_ITERATIONS, MAP=MAP, show=False)
         test_accuracy, test_mae, test_mae_std, test_errors = m.calculate_test_accuracy(season_z, season_lm, season_indicators[train_end:test_end, :], season_x.iloc[train_end:test_end, :], season_margin_y[train_end:test_end])
         game_team_variances = m.calculate_team_variances(season_z_std, season_indicators[train_end:test_end, :])
         season_errors = np.concatenate([season_errors, test_errors])
@@ -145,8 +148,9 @@ def season_train_test_models(input_filename, accuracy_output_filename, correlati
     if evaluate_dictionary["Joint"]:
         season_joint_z, joint_train, season_lm_a, season_lm_h, season_joint_z_std = m.fit_joint_model(
             season_joint_x.iloc[0:train_end, :], season_joint_y.iloc[0:train_end, :], season_indicators[0:train_end, :],
-            joint_p_means, joint_p_vars, MAP=MAP, show=False, max_iter=MAXIMUM_ITERATIONS,
-            a_cols=AWAY_SCORE_COLUMNS, h_cols=HOME_SCORE_COLUMNS, int_a=9.9, int_h=10.8)
+            joint_p_means, joint_p_vars, weights=samp_weights[0:train_end], MAP=MAP, show=False, max_iter=MAXIMUM_ITERATIONS,
+            a_cols=AWAY_SCORE_COLUMNS, h_cols=HOME_SCORE_COLUMNS, int_a=68.0, int_h=78.0,
+            away_points=load_dict["AwayPoints"], home_points=load_dict["HomePoints"])
 
         # test accuracy
         input_matrix = de.replace_design_joint_latent(joint_design_matrix=season_joint_x.iloc[train_end:test_end, :],
@@ -156,7 +160,9 @@ def season_train_test_models(input_filename, accuracy_output_filename, correlati
                                                                                y=season_joint_y.iloc[train_end:test_end, :],
                                                                                lm_a=season_lm_a, lm_h=season_lm_h,
                                                                                a_cols=AWAY_SCORE_COLUMNS,
-                                                                               h_cols=HOME_SCORE_COLUMNS)
+                                                                               h_cols=HOME_SCORE_COLUMNS,
+                                                                               away_points=load_dict["AwayPoints"],
+                                                                               home_points=load_dict["HomePoints"])
 
         accuracy_dictionary["Joint-AwayR2"].append(joint_away)
         accuracy_dictionary["Joint-HomeR2"].append(joint_home)
@@ -168,13 +174,14 @@ def season_train_test_models(input_filename, accuracy_output_filename, correlati
 
     # RETRAINING ON FULL DATASET SO FINAL REPORTED RATINGS REFLECT THE FULL SEASON
     season_z, margin_train, season_lm, season_z_std = m.fit_margin_model(season_x, season_margin_y, season_indicators,
-                                 p_means, p_vars, max_iter=MAXIMUM_ITERATIONS, MAP=MAP, show=False)
+                                 p_means, p_vars, weights=samp_weights, max_iter=MAXIMUM_ITERATIONS, MAP=MAP, show=False)
     print(season_lm.intercept_)
     print(season_lm.coef_)
     season_joint_z, joint_train, season_lm_a, season_lm_h, season_joint_z_std = m.fit_joint_model(
         season_joint_x, season_joint_y, season_indicators,
-        joint_p_means, joint_p_vars, MAP=MAP, show=False,
-        a_cols=AWAY_SCORE_COLUMNS, h_cols=HOME_SCORE_COLUMNS, max_iter=MAXIMUM_ITERATIONS, int_a=9.9, int_h=10.8)
+        joint_p_means, joint_p_vars, weights=samp_weights, MAP=MAP, show=False,
+        a_cols=AWAY_SCORE_COLUMNS, h_cols=HOME_SCORE_COLUMNS, max_iter=MAXIMUM_ITERATIONS, int_a=68.0, int_h=78.0,
+        home_points=load_dict["HomePoints"], away_points=load_dict["AwayPoints"])
 
     z_marg, z_games = cf.calculate_team_average_margins_ro(y=season_margin_y, indicators=season_indicators, train_end=season_indicators.shape[0], z_vec=z)
 
@@ -205,33 +212,59 @@ def season_train_test_models(input_filename, accuracy_output_filename, correlati
     print("%s Done!" % datetime.datetime.now())
 
 if __name__ == "__main__":
+    # # Arguments to function here, defaults for lacrosse presented
+    # season = 2017
+    # i_filename = "LaxPower_Formatted%s.csv" % season
+    # accuracy_o_filename = "Lacrosse-AccuracyOutput%sFull.csv" % season
+    # correlation_o_filename = "Lacrosse-VarianceAccuracyCorrelations%sFull.csv" % season
+    # ratings_o_filename = "Lax"  # Multiple types of ratings output, this is a base/stem for filenames
+
     # Arguments to function here, defaults for lacrosse presented
-    season = 2017
-    i_filename = "LaxPower_Formatted%s.csv" % season
-    accuracy_o_filename = "Lacrosse-AccuracyOutput%sFull.csv" % season
-    correlation_o_filename = "Lacrosse-VarianceAccuracyCorrelations%sFull.csv" % season
-    ratings_o_filename = "Lax"
+    data_path = "C:/Users/robsc/Documents/GitHub/EM-Elo/OutputData/"
+    season = 1718
+    i_filename = "C:/Users/robsc/Documents/Data and Stats/ScrapedData/NCAABB/ModifiedData/NCAABB%s_Neutral.csv" % season
+    accuracy_o_filename = "%sNCAABB-AccuracyOutput%sFull.csv" % (data_path, season)
+    correlation_o_filename = "%sLacrosse-VarianceAccuracyCorrelations%sFull.csv" % (data_path, season)
+    ratings_o_filename = "%sNCAABB" % data_path  # Multiple types of ratings output, this is a base/stem for filenames
 
     m_type = "Margin"
     prop_test = 0.1
     MAP_model = True
     prior_means, prior_vars = [], []
     joint_prior_means, joint_prior_vars = [], []
+
+    # Maps from an argument of the evaluation functions to a boolean for determining if evaluation is run
     eval_dictionary = {"Margin": True,
                        "Margin-Baseline": True,
                        "Elo": True,
                        "Joint": True,
                        "Joint-Baseline": True}
 
-    load_dictionary = {"AwayPoints":" Away Points",
-                       "HomePoints":" Home Points",
-                       "Spread":None,
-                       "OverUnder":None,
-                       "AwayName":"Away Team",
-                       "HomeName":" Home Team",
-                       "RestAvailable":False,
-                       "PrevMarginRatings":None,  # Replace with e.g. "LaxMarginRatings2016.csv"
-                       "PrevJointRatings":None}   # Replace with e.g. "LaxJointRatings2016.csv"
+    # Maps from an argument of the loading function to the column/property of the data file (csv)
+    # load_dictionary = {"AwayPoints":" Away Points",
+    #                    "HomePoints":" Home Points",
+    #                    "Spread":None,
+    #                    "OverUnder":None,
+    #                    "AwayName":"Away Team",
+    #                    "HomeName":" Home Team",
+    #                    "RestAvailable":False,
+    #                    "PrevMarginRatings":None,  # Replace with e.g. "LaxMarginRatings2016.csv"
+    #                    "PrevJointRatings":None,
+    #                    "DifferenceMultiplier":1.0}   # Replace with e.g. "LaxJointRatings2016.csv"
+
+    load_dictionary = {"AwayPoints": "Away-Efficiency",
+                       "HomePoints": "Home-Efficiency",
+                       "Spread": None,
+                       "OverUnder": None,
+                       "AwayName": "Away-Name",
+                       "HomeName": "Home-Name",
+                       "RestAvailable": False,
+                       "PrevMarginRatings": "%sNCAABBMarginRatings1617.csv" % data_path,  # Replace with e.g. "LaxMarginRatings2016.csv"
+                       "PrevJointRatings": "%sNCAABBJointRatings1617.csv" % data_path, # Replace with e.g. "LaxJointRatings2016.csv"
+                       "DifferenceMultiplier": 70.0, # Replace with average possession (using efficiency) or 1.0 (using points)
+                       "Weights": "Weight"}  # Replace with name of training weight column, or None if use all 1s
+    #"%sNCAABBMarginRatings1617.csv" % data_path
+    #"%sNCAABBJointRatings1617.csv" % data_path
     show = True
     season_train_test_models(input_filename=i_filename,
                              accuracy_output_filename=accuracy_o_filename,
